@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="sv">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Avgångar</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --ink:   #0A0A0A;
+      --paper: #F5F4EF;
+      --dim:   #777;
+      --rule:  #C8C7C2;
+    }
+
+    html, body { height: 100%; }
+
+    body {
+      background: var(--paper);
+      color: var(--ink);
+      font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* ── Header ─────────────────────────────────────────────── */
+    header {
+      background: var(--ink);
+      color: var(--paper);
+      padding: 14px 28px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .h-left { display: flex; align-items: center; gap: 18px; }
+    .h-right { display: flex; align-items: center; gap: 18px; }
+
+    #backBtn {
+      display: none;
+      background: none; border: none;
+      color: var(--paper);
+      font-size: 32px; font-weight: 200;
+      line-height: 1; cursor: pointer;
+      opacity: 0.7; transition: opacity 0.2s;
+      padding: 0 4px 0 0;
+    }
+    #backBtn.visible { display: block; }
+    #backBtn:hover { opacity: 1; }
+
+    #clock {
+      font-size: 28px;
+      font-weight: 300;
+      letter-spacing: 1px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .search-btn {
+      background: none; border: none;
+      color: var(--paper);
+      cursor: pointer; opacity: 0.7;
+      display: flex; align-items: center;
+      transition: opacity 0.2s; padding: 0;
+    }
+    .search-btn:hover { opacity: 1; }
+
+    .refresh-dot { cursor: pointer; opacity: 0.7; transition: opacity 0.2s; flex-shrink: 0; }
+    .refresh-dot:hover { opacity: 1; }
+
+    /* ── Shared page wrapper ────────────────────────────────── */
+    .page {
+      flex: 1;
+      padding: 28px;
+      display: flex;
+      flex-direction: column;
+      gap: 28px;
+      max-width: 900px;
+      width: 100%;
+      margin: 0 auto;
+    }
+    .page.hidden { display: none; }
+
+    @media (max-width: 600px) {
+      .page { padding: 16px; gap: 20px; }
+      header { padding: 12px 16px; }
+      #clock { font-size: 22px; }
+    }
+
+    /* ── Board ──────────────────────────────────────────────── */
+    .board { border: 2px solid var(--ink); }
+
+    .board-head {
+      border-bottom: 2px solid var(--ink);
+      padding: 10px 20px;
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+    }
+
+    .board-name { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
+    .board-sub  { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim); }
+    .board-walk { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim); }
+
+    /* ── Departure table ────────────────────────────────────── */
+    .dep-table { width: 100%; border-collapse: collapse; }
+    .dep-table tr { border-bottom: 1px solid var(--rule); }
+    .dep-table tr:last-child { border-bottom: none; }
+    .dep-table td { padding: 13px 20px; vertical-align: middle; }
+
+    .col-line { width: 68px; }
+    .col-time { width: 110px; text-align: right; white-space: nowrap; }
+
+    .line-num {
+      display: inline-block;
+      background: var(--ink); color: var(--paper);
+      font-size: 13px; font-weight: 700;
+      letter-spacing: 0.5px;
+      padding: 3px 10px;
+      min-width: 44px; text-align: center;
+    }
+
+    .dest-text { font-size: 15px; font-weight: 400; }
+
+    .dep-time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
+    .dep-time.now  { background: var(--ink); color: var(--paper); padding: 2px 6px; font-size: 13px; letter-spacing: 1px; }
+    .dep-time.soon { font-weight: 900; }
+
+    /* ── State / loading ────────────────────────────────────── */
+    .state-msg {
+      padding: 28px 20px; text-align: center;
+      font-size: 12px; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--dim);
+    }
+    .dot-anim::after { content: ''; animation: dots 1.4s steps(4, end) infinite; }
+    @keyframes dots {
+      0%   { content: ''; }   25%  { content: '.'; }
+      50%  { content: '..'; } 75%  { content: '...'; }
+    }
+
+    /* ── Search input ───────────────────────────────────────── */
+    .search-field {
+      border: 2px solid var(--ink);
+      display: flex; align-items: center;
+    }
+
+    #searchInput {
+      flex: 1;
+      border: none; outline: none;
+      background: var(--paper); color: var(--ink);
+      font-family: inherit;
+      font-size: 20px; font-weight: 300;
+      letter-spacing: 0.5px;
+      padding: 14px 20px;
+    }
+
+    /* ── Search results list ────────────────────────────────── */
+    .result-item {
+      border: 2px solid var(--ink);
+      border-top: none;
+      padding: 12px 20px;
+      cursor: pointer;
+      display: flex; align-items: baseline; gap: 14px;
+      transition: background 0.12s, color 0.12s;
+    }
+    .result-item:hover { background: var(--ink); color: var(--paper); }
+    .result-item:hover .result-sub { color: var(--rule); }
+
+    .result-name { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
+    .result-sub  { font-size: 11px; letter-spacing: 0.5px; color: var(--dim); }
+
+    /* ── Settings modal ─────────────────────────────────────── */
+    .overlay {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.55); z-index: 200;
+      align-items: center; justify-content: center;
+    }
+    .overlay.open { display: flex; }
+    .modal { background: var(--paper); border: 2px solid var(--ink); width: 380px; max-width: 95vw; padding: 24px; }
+    .modal h3 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
+    .modal label { display: block; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+    .modal input { width: 100%; padding: 9px 12px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); font-size: 13px; font-family: monospace; }
+    .modal input:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
+    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
+    .btn { padding: 8px 18px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; cursor: pointer; border: 2px solid var(--ink); }
+    .btn-ghost   { background: transparent; color: var(--ink); }
+    .btn-primary { background: var(--ink); color: var(--paper); }
+    .btn-ghost:hover   { background: var(--rule); }
+    .btn-primary:hover { opacity: 0.85; }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="h-left">
+    <button id="backBtn" onclick="goBack()">‹</button>
+    <span id="clock"></span>
+  </div>
+  <div class="h-right">
+    <button class="search-btn" id="searchBtn" onclick="showSearch()" title="Sök hållplats">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <circle cx="8.5" cy="8.5" r="5.5"/>
+        <line x1="12.5" y1="12.5" x2="18" y2="18"/>
+      </svg>
+    </button>
+    <svg class="refresh-dot" width="20" height="20" viewBox="0 0 20 20" onclick="openSettings()">
+      <circle cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.25)" stroke-width="1.5"/>
+      <circle id="progressArc" cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.9)" stroke-width="1.5"
+              stroke-dasharray="43.98" stroke-dashoffset="0"
+              transform="rotate(-90 10 10)" style="transition: stroke-dashoffset 1s linear;"/>
+    </svg>
+  </div>
+</header>
+
+<!-- ── Main view ─────────────────────────────────────────────── -->
+<div class="page" id="mainView">
+
+  <div class="board">
+    <div class="board-head">
+      <div style="display:flex;align-items:baseline;gap:16px">
+        <span class="board-name">Vasalund</span>
+        <span class="board-sub">Buss</span>
+        <span class="board-walk" id="walkVasalund"></span>
+      </div>
+    </div>
+    <div id="busBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+  </div>
+
+  <div class="board">
+    <div class="board-head">
+      <div style="display:flex;align-items:baseline;gap:16px">
+        <span class="board-name">Solna station</span>
+        <span class="board-sub">Pendeltåg</span>
+        <span class="board-walk" id="walkSolna"></span>
+      </div>
+    </div>
+    <div id="trainBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+  </div>
+
+  <div class="board">
+    <div class="board-head">
+      <div style="display:flex;align-items:baseline;gap:16px">
+        <span class="board-name">Solna centrum</span>
+        <span class="board-sub">T-bana</span>
+        <span class="board-walk" id="walkSolnaC"></span>
+      </div>
+    </div>
+    <div id="metroBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+  </div>
+
+</div>
+
+<!-- ── Search view ───────────────────────────────────────────── -->
+<div class="page hidden" id="searchView">
+  <div class="search-field">
+    <input type="text" id="searchInput" placeholder="Sök hållplats…" autocomplete="off" oninput="onSearchInput()">
+  </div>
+  <div id="searchResults"></div>
+  <div id="stopBoard"></div>
+</div>
+
+<!-- Settings modal -->
+<div class="overlay" id="overlay">
+  <div class="modal">
+    <h3>API-nyckel</h3>
+    <label>ResRobot v2.1 accessId</label>
+    <input type="text" id="cfgKey">
+    <div class="modal-actions">
+      <button class="btn btn-ghost" onclick="closeSettings()">Avbryt</button>
+      <button class="btn btn-primary" onclick="saveKey()">Spara</button>
+    </div>
+  </div>
+</div>
+
+<script>
+// ── Config ────────────────────────────────────────────────────────────────
+const ACCESS_ID   = localStorage.getItem('rr_key') || '98f9f343-e19e-4732-a53f-95d7daf91119';
+const VASALUND_ID = '740066635';
+const SOLNA_ID    = '740000759';
+const SOLNA_C_ID  = '740021642';
+const WALK        = { vasalund: 3, solna: 10, solnac: 14 };
+const BASE        = 'https://api.resrobot.se/v2.1';
+const REFRESH_SEC = 30;
+const MAX_ROWS    = 4;
+
+let countdown    = REFRESH_SEC;
+let timer        = null;
+let searchTimer  = null;
+
+// ── Clock ─────────────────────────────────────────────────────────────────
+function tickClock() {
+  document.getElementById('clock').textContent =
+    new Date().toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+}
+setInterval(tickClock, 1000);
+tickClock();
+
+// ── API ───────────────────────────────────────────────────────────────────
+function apiKey() { return localStorage.getItem('rr_key') || ACCESS_ID; }
+
+async function fetchDepartures(stopId, max = 30) {
+  const r = await fetch(`${BASE}/departureBoard?accessId=${apiKey()}&id=${stopId}&format=json&maxJourneys=${max}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  if (d.errorCode) throw new Error(d.errorText || `Felkod ${d.errorCode}`);
+  return d.Departure || [];
+}
+
+async function searchStops(query) {
+  const r = await fetch(`${BASE}/location.name?accessId=${apiKey()}&input=${encodeURIComponent(query)}&format=json&maxNo=7`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  return (d.stopLocationOrCoordLocation || [])
+    .map(s => s.StopLocation)
+    .filter(Boolean);
+}
+
+// ── Time helper ───────────────────────────────────────────────────────────
+function calcDisplay(dep) {
+  const dt   = new Date(`${dep.rtDate || dep.date}T${dep.rtTime || dep.time}`);
+  const mins = Math.round((dt - new Date()) / 60000);
+  if (mins <= 0)  return { text: 'Nu',          cls: 'now'  };
+  if (mins <= 2)  return { text: mins + ' min', cls: 'soon' };
+  if (mins <= 59) return { text: mins + ' min', cls: ''     };
+  return { text: (dep.rtTime || dep.time).slice(0, 5), cls: '' };
+}
+
+// ── Destination cleanup ───────────────────────────────────────────────────
+function cleanDest(str = '') {
+  return str
+    .replace(/\s*\([^)]*\)/g, '')
+    .replace(/ T-bana$/i, '')
+    .replace(/ station$/i, '')
+    .replace(/centralstation$/i, 'C')
+    .replace(/ postterminal$/i, '')
+    .trim();
+}
+
+// ── Build departure table ─────────────────────────────────────────────────
+function buildTable(rows, max) {
+  if (!rows.length) return '<div class="state-msg">Inga avgångar</div>';
+  const lim  = max || MAX_ROWS;
+  const body = rows.slice(0, lim).map(([num, dest, dep]) => {
+    const { text, cls } = calcDisplay(dep);
+    return `<tr>
+      <td class="col-line"><span class="line-num">${num}</span></td>
+      <td><span class="dest-text">${dest}</span></td>
+      <td class="col-time"><span class="dep-time ${cls}">${text}</span></td>
+    </tr>`;
+  }).join('');
+  return `<table class="dep-table"><tbody>${body}</tbody></table>`;
+}
+
+// ── Home board filters ────────────────────────────────────────────────────
+function busFilter(dep) {
+  const dir = dep.direction || '';
+  const num = dep.ProductAtStop?.displayNumber || '';
+  return dir.includes('Odenplan') || dir.includes('Sundbyberg') ||
+         (num === '509' && dir.includes('Tomteboda'));
+}
+
+function trainDest(dep) {
+  const dir = dep.direction || '';
+  if (dir.includes('Uppsala') || dir.includes('Gävle'))  return 'Uppsala';
+  if (dir.includes('Märsta') || dir.includes('Arlanda')) return 'Märsta';
+  return 'Stockholm C';
+}
+
+// ── Fetch home boards ─────────────────────────────────────────────────────
+function fetchAll() {
+  fetchDepartures(VASALUND_ID).then(deps => {
+    const rows = deps
+      .filter(d => d.ProductAtStop?.catCode === '7' && busFilter(d))
+      .map(d => {
+        const num  = d.ProductAtStop.displayNumber;
+        const dest = (num === '509' && (d.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.direction);
+        return [num, dest, d];
+      });
+    document.getElementById('busBoard').innerHTML = buildTable(rows);
+  }).catch(e => {
+    document.getElementById('busBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  });
+
+  fetchDepartures(SOLNA_ID).then(deps => {
+    const rows = deps
+      .filter(d => d.ProductAtStop?.catCode === '4')
+      .map(d => [d.ProductAtStop.displayNumber, trainDest(d), d]);
+    document.getElementById('trainBoard').innerHTML = buildTable(rows);
+  }).catch(e => {
+    document.getElementById('trainBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  });
+
+  fetchDepartures(SOLNA_C_ID).then(deps => {
+    const rows = deps
+      .filter(d => d.ProductAtStop?.catCode === '5')
+      .map(d => [d.ProductAtStop.displayNumber, cleanDest(d.direction), d]);
+    document.getElementById('metroBoard').innerHTML = buildTable(rows);
+  }).catch(e => {
+    document.getElementById('metroBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  });
+
+  startCountdown();
+}
+
+// ── Countdown / arc ───────────────────────────────────────────────────────
+const CIRC = 43.98;
+
+function startCountdown() {
+  clearInterval(timer);
+  countdown = REFRESH_SEC;
+  updateArc();
+  timer = setInterval(() => {
+    countdown--;
+    updateArc();
+    if (countdown <= 0) { clearInterval(timer); fetchAll(); }
+  }, 1000);
+}
+function updateArc() {
+  document.getElementById('progressArc').style.strokeDashoffset =
+    CIRC * (1 - countdown / REFRESH_SEC);
+}
+
+// ── View switching ────────────────────────────────────────────────────────
+function showSearch() {
+  document.getElementById('mainView').classList.add('hidden');
+  document.getElementById('searchView').classList.remove('hidden');
+  document.getElementById('backBtn').classList.add('visible');
+  document.getElementById('searchInput').value = '';
+  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('stopBoard').innerHTML = '';
+  document.getElementById('searchInput').focus();
+}
+
+function goBack() {
+  document.getElementById('searchView').classList.add('hidden');
+  document.getElementById('mainView').classList.remove('hidden');
+  document.getElementById('backBtn').classList.remove('visible');
+}
+
+// ── Stop search ───────────────────────────────────────────────────────────
+function onSearchInput() {
+  clearTimeout(searchTimer);
+  const q = document.getElementById('searchInput').value.trim();
+  document.getElementById('stopBoard').innerHTML = '';
+  if (!q) { document.getElementById('searchResults').innerHTML = ''; return; }
+  document.getElementById('searchResults').innerHTML =
+    '<div class="state-msg"><span class="dot-anim">Söker</span></div>';
+  searchTimer = setTimeout(() => doSearch(q), 380);
+}
+
+async function doSearch(q) {
+  try {
+    const stops = await searchStops(q);
+    if (!stops.length) {
+      document.getElementById('searchResults').innerHTML =
+        '<div class="state-msg">Inga hållplatser hittades</div>';
+      return;
+    }
+    document.getElementById('searchResults').innerHTML = stops.map(s => `
+      <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
+        <span class="result-name">${s.name}</span>
+        <span class="result-sub">${s.extId}</span>
+      </div>`).join('');
+  } catch(e) {
+    document.getElementById('searchResults').innerHTML =
+      `<div class="state-msg">⚠ ${e.message}</div>`;
+  }
+}
+
+// ── Departures for searched stop ──────────────────────────────────────────
+async function showStopDepartures(extId, name) {
+  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('stopBoard').innerHTML = `
+    <div class="board">
+      <div class="board-head">
+        <span class="board-name">${name}</span>
+      </div>
+      <div id="dynBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+    </div>`;
+
+  try {
+    const deps = await fetchDepartures(extId, 20);
+    const rows = deps.map(d => [
+      d.ProductAtStop?.displayNumber || '?',
+      cleanDest(d.direction),
+      d
+    ]);
+    document.getElementById('dynBoard').innerHTML = buildTable(rows, 8);
+  } catch(e) {
+    document.getElementById('dynBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  }
+}
+
+// ── Settings ──────────────────────────────────────────────────────────────
+function openSettings() {
+  document.getElementById('cfgKey').value = apiKey();
+  document.getElementById('overlay').classList.add('open');
+}
+function closeSettings() { document.getElementById('overlay').classList.remove('open'); }
+function saveKey() {
+  const k = document.getElementById('cfgKey').value.trim();
+  if (k) localStorage.setItem('rr_key', k);
+  closeSettings();
+  fetchAll();
+}
+document.getElementById('overlay').addEventListener('click', e => {
+  if (e.target === document.getElementById('overlay')) closeSettings();
+});
+
+// ── Boot ──────────────────────────────────────────────────────────────────
+document.getElementById('walkVasalund').textContent = WALK.vasalund + ' min';
+document.getElementById('walkSolna').textContent    = WALK.solna    + ' min';
+document.getElementById('walkSolnaC').textContent   = WALK.solnac   + ' min';
+fetchAll();
+</script>
+</body>
+</html>
