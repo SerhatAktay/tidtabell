@@ -172,24 +172,6 @@
     .result-name { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
     .result-sub  { font-size: 11px; letter-spacing: 0.5px; color: var(--dim); }
 
-    /* ── Settings modal ─────────────────────────────────────── */
-    .overlay {
-      display: none; position: fixed; inset: 0;
-      background: rgba(0,0,0,0.55); z-index: 200;
-      align-items: center; justify-content: center;
-    }
-    .overlay.open { display: flex; }
-    .modal { background: var(--paper); border: 2px solid var(--ink); width: 380px; max-width: 95vw; padding: 24px; }
-    .modal h3 { font-size: 11px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; margin-bottom: 16px; }
-    .modal label { display: block; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
-    .modal input { width: 100%; padding: 9px 12px; border: 1.5px solid var(--ink); background: var(--paper); color: var(--ink); font-size: 13px; font-family: monospace; }
-    .modal input:focus { outline: 2px solid var(--ink); outline-offset: 1px; }
-    .modal-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 20px; }
-    .btn { padding: 8px 18px; font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; font-weight: 700; cursor: pointer; border: 2px solid var(--ink); }
-    .btn-ghost   { background: transparent; color: var(--ink); }
-    .btn-primary { background: var(--ink); color: var(--paper); }
-    .btn-ghost:hover   { background: var(--rule); }
-    .btn-primary:hover { opacity: 0.85; }
   </style>
 </head>
 <body>
@@ -206,7 +188,7 @@
         <line x1="12.5" y1="12.5" x2="18" y2="18"/>
       </svg>
     </button>
-    <svg class="refresh-dot" width="20" height="20" viewBox="0 0 20 20" onclick="openSettings()">
+    <svg class="refresh-dot" width="20" height="20" viewBox="0 0 20 20" style="cursor:default">
       <circle cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.25)" stroke-width="1.5"/>
       <circle id="progressArc" cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.9)" stroke-width="1.5"
               stroke-dasharray="43.98" stroke-dashoffset="0"
@@ -262,27 +244,16 @@
   <div id="stopBoard"></div>
 </div>
 
-<!-- Settings modal -->
-<div class="overlay" id="overlay">
-  <div class="modal">
-    <h3>API-nyckel</h3>
-    <label>ResRobot v2.1 accessId</label>
-    <input type="text" id="cfgKey">
-    <div class="modal-actions">
-      <button class="btn btn-ghost" onclick="closeSettings()">Avbryt</button>
-      <button class="btn btn-primary" onclick="saveKey()">Spara</button>
-    </div>
-  </div>
-</div>
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────
-const ACCESS_ID   = localStorage.getItem('rr_key') || '98f9f343-e19e-4732-a53f-95d7daf91119';
+// After deploying worker.js to Cloudflare, paste your worker URL here:
+const PROXY_BASE  = 'https://tidtabell.serhat-fd0.workers.dev';
+
 const VASALUND_ID = '740066635';
 const SOLNA_ID    = '740000759';
 const SOLNA_C_ID  = '740021642';
 const WALK        = { vasalund: 3, solna: 10, solnac: 14 };
-const BASE        = 'https://api.resrobot.se/v2.1';
 const REFRESH_SEC = 30;
 const MAX_ROWS    = 4;
 
@@ -298,11 +269,9 @@ function tickClock() {
 setInterval(tickClock, 1000);
 tickClock();
 
-// ── API ───────────────────────────────────────────────────────────────────
-function apiKey() { return localStorage.getItem('rr_key') || ACCESS_ID; }
-
+// ── API (all calls go through the Cloudflare proxy) ──────────────────────
 async function fetchDepartures(stopId, max = 30) {
-  const r = await fetch(`${BASE}/departureBoard?accessId=${apiKey()}&id=${stopId}&format=json&maxJourneys=${max}`);
+  const r = await fetch(`${PROXY_BASE}/departureBoard?id=${stopId}&maxJourneys=${max}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   if (d.errorCode) throw new Error(d.errorText || `Felkod ${d.errorCode}`);
@@ -310,7 +279,7 @@ async function fetchDepartures(stopId, max = 30) {
 }
 
 async function searchStops(query) {
-  const r = await fetch(`${BASE}/location.name?accessId=${apiKey()}&input=${encodeURIComponent(query)}&format=json&maxNo=7`);
+  const r = await fetch(`${PROXY_BASE}/location.name?input=${encodeURIComponent(query)}&maxNo=7`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   return (d.stopLocationOrCoordLocation || [])
@@ -494,21 +463,6 @@ async function showStopDepartures(extId, name) {
   }
 }
 
-// ── Settings ──────────────────────────────────────────────────────────────
-function openSettings() {
-  document.getElementById('cfgKey').value = apiKey();
-  document.getElementById('overlay').classList.add('open');
-}
-function closeSettings() { document.getElementById('overlay').classList.remove('open'); }
-function saveKey() {
-  const k = document.getElementById('cfgKey').value.trim();
-  if (k) localStorage.setItem('rr_key', k);
-  closeSettings();
-  fetchAll();
-}
-document.getElementById('overlay').addEventListener('click', e => {
-  if (e.target === document.getElementById('overlay')) closeSettings();
-});
 
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.getElementById('walkVasalund').textContent = WALK.vasalund + ' min';
