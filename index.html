@@ -133,6 +133,33 @@
       transform: translateY(-1px);
     }
 
+    .dest-wrap { display: inline-block; vertical-align: middle; }
+
+    .dep-platform {
+      display: inline-block;
+      margin-left: 8px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      color: var(--dim);
+      border: 1px solid var(--rule);
+      padding: 1px 5px;
+      vertical-align: middle;
+    }
+
+    .dep-last {
+      display: block;
+      margin-top: 2px;
+      font-size: 10px;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: var(--dim);
+    }
+
+    /* ── Leave-now highlight (home boards only) ────────────────── */
+    .dep-table tr.row-unreachable { opacity: 0.4; }
+    .dep-table tr.row-next { box-shadow: inset 3px 0 0 var(--ink); }
+
     .dep-time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .dep-time.now  { background: var(--ink); color: var(--paper); padding: 2px 6px; font-size: 13px; letter-spacing: 1px; }
     .dep-time.soon { font-weight: 900; }
@@ -220,6 +247,12 @@
 
     .result-name { font-size: 13px; font-weight: 700; letter-spacing: 1.5px; text-transform: uppercase; }
     .result-sub  { font-size: 11px; letter-spacing: 0.5px; color: var(--dim); }
+
+    .recents-label {
+      font-size: 11px; font-weight: 700; letter-spacing: 1.5px;
+      text-transform: uppercase; color: var(--dim);
+      margin-bottom: 6px;
+    }
 
   </style>
 </head>
@@ -428,6 +461,46 @@ function closeAllPopovers() {
 }
 document.addEventListener('click', closeAllPopovers);
 
+// ── Metro line accent colors ────────────────────────────────────────────────
+// Commonly-used approximations of SL's Blue/Red/Green line colors — not
+// pulled from an official brand file, just widely-recognized. Buses and
+// pendeltåg don't have a reliable per-line official color scheme, so they're
+// left uncolored.
+const METRO_LINE_COLORS = {
+  '10': '#0087CB', '11': '#0087CB', // Blåa linjen
+  '13': '#D71921', '14': '#D71921', // Röda linjen
+  '17': '#148541', '18': '#148541', '19': '#148541', // Gröna linjen
+};
+
+// ── Platform / track ─────────────────────────────────────────────────────────
+function platformOf(dep) {
+  return dep.realtime_platform?.designation || dep.scheduled_platform?.designation || '';
+}
+
+// ── Recent stops (localStorage) ─────────────────────────────────────────────
+const RECENTS_KEY = 'tidtabell_recents_v1';
+
+function loadRecents() {
+  try { return JSON.parse(localStorage.getItem(RECENTS_KEY)) || []; }
+  catch { return []; }
+}
+
+function saveRecent(stop) {
+  let list = loadRecents().filter(s => s.extId !== stop.extId);
+  list.unshift(stop);
+  try { localStorage.setItem(RECENTS_KEY, JSON.stringify(list.slice(0, 8))); } catch {}
+}
+
+function renderRecents() {
+  const list = loadRecents();
+  if (!list.length) return '';
+  return `<div class="recents-label">Senaste</div>` + list.map(s => `
+    <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
+      <span class="result-name">${s.name}</span>
+      <span class="result-sub">${s.extId}</span>
+    </div>`).join('');
+}
+
 // ── Destination cleanup ───────────────────────────────────────────────────
 function cleanDest(str = '') {
   return str
@@ -440,13 +513,22 @@ function cleanDest(str = '') {
 }
 
 // ── Build departure table ─────────────────────────────────────────────────
-function buildTable(rows, max) {
+// walkMin: if given (home boards only), rows you can't reach in time are
+// dimmed, and the first reachable one is highlighted with a left accent.
+function buildTable(rows, max, walkMin) {
   if (!rows.length) return '<div class="state-msg">Inga avgångar</div>';
-  const lim  = max || MAX_ROWS;
-  const body = rows.slice(0, lim).map(([num, dest, dep]) => {
+  const lim    = max || MAX_ROWS;
+  const sliced = rows.slice(0, lim);
+  const now    = new Date();
+  const nowHr  = now.getHours() + now.getMinutes() / 60;
+  const isLateEvening = nowHr >= 21 || nowHr < 3;
+  let markedNext = false;
+
+  const body = sliced.map(([num, dest, dep]) => {
     const { text, cls } = calcDisplay(dep);
     const icon  = modeIcon(dep.route?.transport_mode);
     const delta = deltaInfo(dep);
+    const plat  = platformOf(dep);
 
     let deltaHtml = '';
     if (delta) {
@@ -460,9 +542,41 @@ function buildTable(rows, max) {
       }
     }
 
-    return `<tr>
-      <td class="col-line"><span class="line-num">${num}</span></td>
-      <td><span class="mode-icon">${icon}</span><span class="dest-text">${dest}</span></td>
+    const platHtml = plat ? `<span class="dep-platform">${escapeHtml(plat)}</span>` : '';
+
+    // Heuristic only: "no more of this line in the next hour", based on
+    // what's in the currently fetched 60-minute window — not a verified
+    // "last of the day" (we can't see past that window).
+    let lastHtml = '';
+    if (isLateEvening && !dep.canceled) {
+      const key = (dep.route?.designation || '') + '|' + (dep.route?.direction || '');
+      const depTime = new Date(dep.realtime || dep.scheduled);
+      const hasLater = rows.some(([, , other]) => {
+        if (other === dep) return false;
+        const otherKey = (other.route?.designation || '') + '|' + (other.route?.direction || '');
+        if (otherKey !== key) return false;
+        return new Date(other.realtime || other.scheduled) > depTime;
+      });
+      if (!hasLater) lastHtml = `<span class="dep-last">Inga fler inom en timme</span>`;
+    }
+
+    let rowClass = '';
+    if (walkMin != null && !dep.canceled) {
+      const minsUntil = (new Date(dep.realtime || dep.scheduled) - now) / 60000;
+      if (minsUntil < walkMin) {
+        rowClass = 'row-unreachable';
+      } else if (!markedNext) {
+        rowClass = 'row-next';
+        markedNext = true;
+      }
+    }
+
+    const metroColor = dep.route?.transport_mode === 'METRO' ? METRO_LINE_COLORS[dep.route.designation] : null;
+    const lineStyle = metroColor ? ` style="box-shadow: inset 0 -3px 0 ${metroColor};"` : '';
+
+    return `<tr class="${rowClass}">
+      <td class="col-line"><span class="line-num"${lineStyle}>${num}</span></td>
+      <td><span class="mode-icon">${icon}</span><span class="dest-wrap"><span class="dest-text">${dest}</span>${platHtml}${lastHtml}</span></td>
       <td class="col-time"><span class="dep-time ${cls}">${text}</span>${deltaHtml}</td>
     </tr>`;
   }).join('');
@@ -494,7 +608,7 @@ function fetchAll() {
         const dest = (num === '509' && (d.route.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.route.direction);
         return [num, dest, d];
       });
-    document.getElementById('busBoard').innerHTML = buildTable(rows);
+    document.getElementById('busBoard').innerHTML = buildTable(rows, null, WALK.vasalund);
   }).catch(e => {
     document.getElementById('busBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
   });
@@ -503,7 +617,7 @@ function fetchAll() {
     const rows = deps
       .filter(d => d.route?.transport_mode === 'TRAIN')
       .map(d => [d.route.designation, trainDest(d), d]);
-    document.getElementById('trainBoard').innerHTML = buildTable(rows);
+    document.getElementById('trainBoard').innerHTML = buildTable(rows, null, WALK.solna);
   }).catch(e => {
     document.getElementById('trainBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
   });
@@ -512,7 +626,7 @@ function fetchAll() {
     const rows = deps
       .filter(d => d.route?.transport_mode === 'METRO')
       .map(d => [d.route.designation, cleanDest(d.route.direction), d]);
-    document.getElementById('metroBoard').innerHTML = buildTable(rows);
+    document.getElementById('metroBoard').innerHTML = buildTable(rows, null, WALK.solnac);
   }).catch(e => {
     document.getElementById('metroBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
   });
@@ -544,7 +658,7 @@ function showSearch() {
   document.getElementById('searchView').classList.remove('hidden');
   document.getElementById('backBtn').classList.add('visible');
   document.getElementById('searchInput').value = '';
-  document.getElementById('searchResults').innerHTML = '';
+  document.getElementById('searchResults').innerHTML = renderRecents();
   document.getElementById('stopBoard').innerHTML = '';
   document.getElementById('searchInput').focus();
 }
@@ -560,7 +674,7 @@ function onSearchInput() {
   clearTimeout(searchTimer);
   const q = document.getElementById('searchInput').value.trim();
   document.getElementById('stopBoard').innerHTML = '';
-  if (!q) { document.getElementById('searchResults').innerHTML = ''; return; }
+  if (!q) { document.getElementById('searchResults').innerHTML = renderRecents(); return; }
   document.getElementById('searchResults').innerHTML =
     '<div class="state-msg"><span class="dot-anim">Söker</span></div>';
   searchTimer = setTimeout(() => doSearch(q), 380);
@@ -587,6 +701,7 @@ async function doSearch(q) {
 
 // ── Departures for searched stop ──────────────────────────────────────────
 async function showStopDepartures(extId, name) {
+  saveRecent({ extId, name });
   document.getElementById('searchResults').innerHTML = '';
   document.getElementById('stopBoard').innerHTML = `
     <div class="board">
