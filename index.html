@@ -725,6 +725,33 @@ async function showStopDepartures(extId, name) {
 }
 
 
+// ── Auto-update ──────────────────────────────────────────────────────────
+// This page is a static file on GitHub Pages — a tab left open never
+// re-downloads it on its own. Periodically HEAD-check the page's own
+// Last-Modified/ETag (cache-busted so the CDN can't serve a stale answer)
+// and reload once a newer deploy shows up. Skipped while typing in search,
+// so it can't yank the page out from under you mid-lookup.
+const UPDATE_CHECK_MS = 5 * 60 * 1000;
+let deployedVersion = null;
+
+async function checkForUpdate() {
+  try {
+    const r = await fetch(`${location.pathname}?v=${Date.now()}`, { method: 'HEAD', cache: 'no-store' });
+    const version = r.headers.get('etag') || r.headers.get('last-modified');
+    if (!version) return;
+    if (deployedVersion === null) { deployedVersion = version; return; }
+    if (version === deployedVersion) return;
+
+    const searching = !document.getElementById('searchView').classList.contains('hidden')
+      && document.activeElement === document.getElementById('searchInput');
+    if (searching) return; // try again next cycle instead of interrupting
+
+    location.reload();
+  } catch (e) { /* offline or blocked — just try again next cycle */ }
+}
+setInterval(checkForUpdate, UPDATE_CHECK_MS);
+checkForUpdate();
+
 // ── Boot ──────────────────────────────────────────────────────────────────
 document.getElementById('walkVasalund').textContent = WALK.vasalund + ' min';
 document.getElementById('walkSolna').textContent    = WALK.solna    + ' min';
