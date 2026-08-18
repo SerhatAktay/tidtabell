@@ -242,6 +242,17 @@
     .nearby-btn:hover { background: var(--ink); color: var(--paper); }
     .nearby-btn svg { flex-shrink: 0; }
 
+    .place-field { border-top: none; }
+    .place-field input {
+      flex: 1;
+      border: none; outline: none;
+      background: var(--paper); color: var(--ink);
+      font-family: inherit;
+      font-size: 14px; font-weight: 400;
+      letter-spacing: 0.3px;
+      padding: 12px 20px;
+    }
+
     #searchInput {
       flex: 1;
       border: none; outline: none;
@@ -272,6 +283,11 @@
       text-transform: uppercase; color: var(--dim);
       margin-bottom: 6px;
     }
+
+    /* Results/recents/nearby lists render inside #searchResults, separated
+       from the search field above by the page's flex gap — without this,
+       the list has no visible top edge. */
+    #searchResults > *:first-child { border-top: 2px solid var(--ink); }
 
   </style>
 </head>
@@ -348,6 +364,9 @@
     </svg>
     <span>Hållplatser nära dig</span>
   </button>
+  <div class="search-field place-field">
+    <input type="text" id="placeInput" placeholder="…eller hållplatser nära en plats" autocomplete="off" oninput="onPlaceInput()">
+  </div>
   <div id="searchResults"></div>
   <div id="stopBoard"></div>
 </div>
@@ -572,6 +591,29 @@ function nearbyUpdateLink() {
   </button>`;
 }
 
+// Shared by "near me" and "near a place": try 100 m, widen to 300 m if empty.
+async function fetchNearbyWithFallback(lat, lon) {
+  let stops  = await fetchNearby(lat, lon, 100);
+  let radius = 100;
+  if (!stops.length) {
+    stops  = await fetchNearby(lat, lon, 300);
+    radius = 300;
+  }
+  return { stops, radius };
+}
+
+function renderNearbyList(stops, radius, nearLabel, footerHtml = '') {
+  if (!stops.length) {
+    return '<div class="state-msg">Inga hållplatser inom 300 m</div>' + footerHtml;
+  }
+  const label = radius > 100 ? `Inget inom 100 m — visar inom ${radius} m` : nearLabel;
+  return `<div class="recents-label">${label}</div>` + stops.map(s => `
+    <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
+      <span class="result-name">${s.name}</span>
+      <span class="result-sub">${s.dist} m</span>
+    </div>`).join('') + footerHtml;
+}
+
 async function findNearby(forceRefresh) {
   const resultsEl = document.getElementById('searchResults');
   document.getElementById('stopBoard').innerHTML = '';
@@ -590,22 +632,47 @@ async function findNearby(forceRefresh) {
 
   resultsEl.innerHTML = '<div class="state-msg"><span class="dot-anim">Söker hållplatser</span></div>';
   try {
-    let stops   = await fetchNearby(loc.lat, loc.lon, 100);
-    let radius  = 100;
-    if (!stops.length) {
-      stops  = await fetchNearby(loc.lat, loc.lon, 300);
-      radius = 300;
-    }
-    if (!stops.length) {
-      resultsEl.innerHTML = '<div class="state-msg">Inga hållplatser inom 300 m</div>' + nearbyUpdateLink();
+    const { stops, radius } = await fetchNearbyWithFallback(loc.lat, loc.lon);
+    resultsEl.innerHTML = renderNearbyList(stops, radius, 'Nära dig', nearbyUpdateLink());
+  } catch (e) {
+    resultsEl.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  }
+}
+
+// ── Nearby stops around an arbitrary typed place/address ────────────────────
+let placeTimer = null;
+
+function onPlaceInput() {
+  clearTimeout(placeTimer);
+  const q = document.getElementById('placeInput').value.trim();
+  if (!q) return;
+  placeTimer = setTimeout(() => doPlaceSearch(q), 380);
+}
+
+async function geocodePlace(query) {
+  const r = await fetch(`${PROXY_BASE}/geocode?input=${encodeURIComponent(query)}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  if (d.errorCode) throw new Error(d.errorText || `Felkod ${d.errorCode}`);
+  const best = (d.stopLocationOrCoordLocation || [])
+    .map(e => e.StopLocation || e.CoordLocation)
+    .find(loc => loc && loc.lat != null && loc.lon != null);
+  return best || null;
+}
+
+async function doPlaceSearch(query) {
+  const resultsEl = document.getElementById('searchResults');
+  document.getElementById('stopBoard').innerHTML = '';
+  resultsEl.innerHTML = '<div class="state-msg"><span class="dot-anim">Söker plats</span></div>';
+  try {
+    const place = await geocodePlace(query);
+    if (!place) {
+      resultsEl.innerHTML = '<div class="state-msg">Hittade ingen plats</div>';
       return;
     }
-    const label = radius > 100 ? `Inget inom 100 m — visar inom ${radius} m` : 'Nära dig';
-    resultsEl.innerHTML = `<div class="recents-label">${label}</div>` + stops.map(s => `
-      <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
-        <span class="result-name">${s.name}</span>
-        <span class="result-sub">${s.dist} m</span>
-      </div>`).join('') + nearbyUpdateLink();
+    resultsEl.innerHTML = '<div class="state-msg"><span class="dot-anim">Söker hållplatser</span></div>';
+    const { stops, radius } = await fetchNearbyWithFallback(place.lat, place.lon);
+    resultsEl.innerHTML = renderNearbyList(stops, radius, `Nära ${escapeHtml(place.name)}`);
   } catch (e) {
     resultsEl.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
   }

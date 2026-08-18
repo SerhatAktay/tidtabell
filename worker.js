@@ -35,15 +35,18 @@ async function handleRequest(request) {
   // /departures/<stopId>  -> live departures for a stop (Trafiklab Realtime)
   // /stops/name/<query>   -> stop search by name (Trafiklab Realtime)
   // /nearbystops          -> stops near a lat/lon (ResRobot v2.1)
+  // /geocode              -> resolve free-text place/address to lat/lon (ResRobot v2.1)
   const isDepartures = url.pathname.startsWith('/departures/');
   const isStopSearch = url.pathname.startsWith('/stops/name/');
   const isNearby      = url.pathname === '/nearbystops';
+  const isGeocode     = url.pathname === '/geocode';
 
-  if (isNearby) {
+  if (isNearby || isGeocode) {
     const params = new URLSearchParams(url.search);
     params.set('accessId', RESROBOT_KEY);
     params.set('format', 'json');
-    const upstream = `${RESROBOT}/location.nearbystops?${params.toString()}`;
+    const endpoint = isNearby ? 'location.nearbystops' : 'location.name';
+    const upstream = `${RESROBOT}/${endpoint}?${params.toString()}`;
     return proxy(upstream);
   }
 
