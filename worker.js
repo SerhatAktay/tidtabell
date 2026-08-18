@@ -16,6 +16,10 @@
  *      RESROBOT_KEY = <your key>   (mark as Encrypted)
  *
  * After saving, go to Settings → Variables and add both.
+ *
+ * Note: the /geocode route (nearby-a-place search) has been removed along
+ * with that feature on the frontend — only /nearbystops (geolocation-based
+ * "near me") remains.
  */
 
 const REALTIME  = 'https://realtime-api.trafiklab.se/v1';
@@ -35,18 +39,15 @@ async function handleRequest(request) {
   // /departures/<stopId>  -> live departures for a stop (Trafiklab Realtime)
   // /stops/name/<query>   -> stop search by name (Trafiklab Realtime)
   // /nearbystops          -> stops near a lat/lon (ResRobot v2.1)
-  // /geocode              -> resolve free-text place/address to lat/lon (ResRobot v2.1)
   const isDepartures = url.pathname.startsWith('/departures/');
   const isStopSearch = url.pathname.startsWith('/stops/name/');
   const isNearby      = url.pathname === '/nearbystops';
-  const isGeocode     = url.pathname === '/geocode';
 
-  if (isNearby || isGeocode) {
+  if (isNearby) {
     const params = new URLSearchParams(url.search);
     params.set('accessId', RESROBOT_KEY);
     params.set('format', 'json');
-    const endpoint = isNearby ? 'location.nearbystops' : 'location.name';
-    const upstream = `${RESROBOT}/${endpoint}?${params.toString()}`;
+    const upstream = `${RESROBOT}/location.nearbystops?${params.toString()}`;
     return proxy(upstream);
   }
 
