@@ -87,6 +87,11 @@
       .page { padding: 16px; gap: 20px; }
       header { padding: 12px 16px; }
       #clock { font-size: 22px; }
+      .dep-table td { padding: 13px 12px; }
+      .col-line { width: 54px; }
+      .col-time { width: 88px; }
+      .line-num { min-width: 34px; padding: 3px 6px; font-size: 12px; }
+      .mode-icon { margin-right: 6px; }
     }
 
     /* ── Board ──────────────────────────────────────────────── */
@@ -682,6 +687,9 @@ async function doPlaceSearch(query) {
 function cleanDest(str = '') {
   return str
     .replace(/\s*\([^)]*\)/g, '')
+    .replace(/ via .*/i, '')   // drop routing detail ("... via Golfvägen och Ekbacken") — a
+                                // real board wouldn't show it, and it's what was pushing long
+                                // destinations onto 4-5 lines on narrow phones
     .replace(/ T-bana$/i, '')
     .replace(/ station$/i, '')
     .replace(/centralstation$/i, 'C')
