@@ -128,6 +128,7 @@
     .dep-time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .dep-time.now  { background: var(--ink); color: var(--paper); padding: 2px 6px; font-size: 13px; letter-spacing: 1px; }
     .dep-time.soon { font-weight: 900; }
+    .dep-time.cancel { font-size: 12px; font-weight: 400; text-decoration: line-through; color: var(--dim); letter-spacing: 0.5px; }
 
     /* ── State / loading ────────────────────────────────────── */
     .state-msg {
@@ -270,31 +271,30 @@ setInterval(tickClock, 1000);
 tickClock();
 
 // ── API (all calls go through the Cloudflare proxy) ──────────────────────
-async function fetchDepartures(stopId, max = 30) {
-  const r = await fetch(`${PROXY_BASE}/departureBoard?id=${stopId}&maxJourneys=${max}`);
+async function fetchDepartures(stopId) {
+  const r = await fetch(`${PROXY_BASE}/departures/${stopId}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
-  if (d.errorCode) throw new Error(d.errorText || `Felkod ${d.errorCode}`);
-  return d.Departure || [];
+  if (d.error) throw new Error(d.error);
+  return d.departures || [];
 }
 
 async function searchStops(query) {
-  const r = await fetch(`${PROXY_BASE}/location.name?input=${encodeURIComponent(query)}&maxNo=7`);
+  const r = await fetch(`${PROXY_BASE}/stops/name/${encodeURIComponent(query)}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
-  return (d.stopLocationOrCoordLocation || [])
-    .map(s => s.StopLocation)
-    .filter(Boolean);
+  return (d.stop_groups || []).map(g => ({ extId: g.id, name: g.name }));
 }
 
 // ── Time helper ───────────────────────────────────────────────────────────
 function calcDisplay(dep) {
-  const dt   = new Date(`${dep.rtDate || dep.date}T${dep.rtTime || dep.time}`);
+  if (dep.canceled) return { text: 'Inställd', cls: 'cancel' };
+  const dt   = new Date(dep.realtime || dep.scheduled);
   const mins = Math.round((dt - new Date()) / 60000);
   if (mins <= 0)  return { text: 'Nu',          cls: 'now'  };
   if (mins <= 2)  return { text: mins + ' min', cls: 'soon' };
   if (mins <= 59) return { text: mins + ' min', cls: ''     };
-  return { text: (dep.rtTime || dep.time).slice(0, 5), cls: '' };
+  return { text: dt.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' }), cls: '' };
 }
 
 // ── Destination cleanup ───────────────────────────────────────────────────
@@ -325,14 +325,14 @@ function buildTable(rows, max) {
 
 // ── Home board filters ────────────────────────────────────────────────────
 function busFilter(dep) {
-  const dir = dep.direction || '';
-  const num = dep.ProductAtStop?.displayNumber || '';
+  const dir = dep.route?.direction || '';
+  const num = dep.route?.designation || '';
   return dir.includes('Odenplan') || dir.includes('Sundbyberg') ||
          (num === '509' && dir.includes('Tomteboda'));
 }
 
 function trainDest(dep) {
-  const dir = dep.direction || '';
+  const dir = dep.route?.direction || '';
   if (dir.includes('Uppsala') || dir.includes('Gävle'))  return 'Uppsala';
   if (dir.includes('Märsta') || dir.includes('Arlanda')) return 'Märsta';
   return 'Stockholm C';
@@ -342,10 +342,10 @@ function trainDest(dep) {
 function fetchAll() {
   fetchDepartures(VASALUND_ID).then(deps => {
     const rows = deps
-      .filter(d => d.ProductAtStop?.catCode === '7' && busFilter(d))
+      .filter(d => d.route?.transport_mode === 'BUS' && busFilter(d))
       .map(d => {
-        const num  = d.ProductAtStop.displayNumber;
-        const dest = (num === '509' && (d.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.direction);
+        const num  = d.route.designation;
+        const dest = (num === '509' && (d.route.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.route.direction);
         return [num, dest, d];
       });
     document.getElementById('busBoard').innerHTML = buildTable(rows);
@@ -355,8 +355,8 @@ function fetchAll() {
 
   fetchDepartures(SOLNA_ID).then(deps => {
     const rows = deps
-      .filter(d => d.ProductAtStop?.catCode === '4')
-      .map(d => [d.ProductAtStop.displayNumber, trainDest(d), d]);
+      .filter(d => d.route?.transport_mode === 'TRAIN')
+      .map(d => [d.route.designation, trainDest(d), d]);
     document.getElementById('trainBoard').innerHTML = buildTable(rows);
   }).catch(e => {
     document.getElementById('trainBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
@@ -364,8 +364,8 @@ function fetchAll() {
 
   fetchDepartures(SOLNA_C_ID).then(deps => {
     const rows = deps
-      .filter(d => d.ProductAtStop?.catCode === '5')
-      .map(d => [d.ProductAtStop.displayNumber, cleanDest(d.direction), d]);
+      .filter(d => d.route?.transport_mode === 'METRO')
+      .map(d => [d.route.designation, cleanDest(d.route.direction), d]);
     document.getElementById('metroBoard').innerHTML = buildTable(rows);
   }).catch(e => {
     document.getElementById('metroBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
@@ -451,10 +451,10 @@ async function showStopDepartures(extId, name) {
     </div>`;
 
   try {
-    const deps = await fetchDepartures(extId, 20);
+    const deps = await fetchDepartures(extId);
     const rows = deps.map(d => [
-      d.ProductAtStop?.displayNumber || '?',
-      cleanDest(d.direction),
+      d.route?.designation || '?',
+      cleanDest(d.route?.direction),
       d
     ]);
     document.getElementById('dynBoard').innerHTML = buildTable(rows, 8);
