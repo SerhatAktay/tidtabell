@@ -223,6 +223,25 @@
       display: flex; align-items: center;
     }
 
+    /* ── Nearby-stops trigger / update-location link ──────────── */
+    .nearby-btn {
+      display: flex; align-items: center; gap: 10px;
+      width: 100%;
+      border: 2px solid var(--ink);
+      border-top: none;
+      background: none;
+      padding: 12px 20px;
+      cursor: pointer;
+      font-family: inherit;
+      font-size: 12px; font-weight: 700;
+      letter-spacing: 1.5px; text-transform: uppercase;
+      color: var(--ink);
+      text-align: left;
+      transition: background 0.12s, color 0.12s;
+    }
+    .nearby-btn:hover { background: var(--ink); color: var(--paper); }
+    .nearby-btn svg { flex-shrink: 0; }
+
     #searchInput {
       flex: 1;
       border: none; outline: none;
@@ -322,6 +341,13 @@
   <div class="search-field">
     <input type="text" id="searchInput" placeholder="Sök hållplats…" autocomplete="off" oninput="onSearchInput()">
   </div>
+  <button type="button" class="nearby-btn" onclick="findNearby()">
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M10 18 C10 18 16 12.5 16 8 a6 6 0 1 0 -12 0 C4 12.5 10 18 10 18 Z"/>
+      <circle cx="10" cy="8" r="2.2"/>
+    </svg>
+    <span>Hållplatser nära dig</span>
+  </button>
   <div id="searchResults"></div>
   <div id="stopBoard"></div>
 </div>
@@ -365,6 +391,17 @@ async function searchStops(query) {
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   return (d.stop_groups || []).map(g => ({ extId: g.id, name: g.name }));
+}
+
+async function fetchNearby(lat, lon, radius, maxNo = 10) {
+  const r = await fetch(`${PROXY_BASE}/nearbystops?originCoordLat=${lat}&originCoordLong=${lon}&r=${radius}&maxNo=${maxNo}`);
+  if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  const d = await r.json();
+  if (d.errorCode) throw new Error(d.errorText || `Felkod ${d.errorCode}`);
+  return (d.stopLocationOrCoordLocation || [])
+    .map(s => s.StopLocation)
+    .filter(Boolean)
+    .map(s => ({ extId: s.extId, name: s.name, dist: s.dist }));
 }
 
 // ── Time helper ───────────────────────────────────────────────────────────
@@ -499,6 +536,79 @@ function renderRecents() {
       <span class="result-name">${s.name}</span>
       <span class="result-sub">${s.extId}</span>
     </div>`).join('');
+}
+
+// ── Your location (setting) + nearby stops ──────────────────────────────────
+const LOCATION_KEY = 'tidtabell_location_v1';
+
+function loadLocation() {
+  try { return JSON.parse(localStorage.getItem(LOCATION_KEY)); } catch { return null; }
+}
+function saveLocation(loc) {
+  try { localStorage.setItem(LOCATION_KEY, JSON.stringify(loc)); } catch {}
+}
+
+function getCurrentPosition() {
+  return new Promise((resolve, reject) => {
+    if (!navigator.geolocation) { reject(new Error('Geolocation stöds inte i den här webbläsaren')); return; }
+    navigator.geolocation.getCurrentPosition(
+      pos => resolve({ lat: pos.coords.latitude, lon: pos.coords.longitude }),
+      err => reject(new Error(geoErrorMessage(err))),
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  });
+}
+
+function geoErrorMessage(err) {
+  if (err.code === err.PERMISSION_DENIED)    return 'Platsåtkomst nekad';
+  if (err.code === err.POSITION_UNAVAILABLE) return 'Din plats är inte tillgänglig just nu';
+  if (err.code === err.TIMEOUT)              return 'Det tog för lång tid att hämta din plats';
+  return 'Kunde inte hämta din plats';
+}
+
+function nearbyUpdateLink() {
+  return `<button type="button" class="nearby-btn" onclick="findNearby(true)">
+    <span>Uppdatera plats</span>
+  </button>`;
+}
+
+async function findNearby(forceRefresh) {
+  const resultsEl = document.getElementById('searchResults');
+  document.getElementById('stopBoard').innerHTML = '';
+  resultsEl.innerHTML = '<div class="state-msg"><span class="dot-anim">Hämtar plats</span></div>';
+
+  let loc = forceRefresh ? null : loadLocation();
+  if (!loc) {
+    try {
+      loc = await getCurrentPosition();
+      saveLocation(loc);
+    } catch (e) {
+      resultsEl.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+      return;
+    }
+  }
+
+  resultsEl.innerHTML = '<div class="state-msg"><span class="dot-anim">Söker hållplatser</span></div>';
+  try {
+    let stops   = await fetchNearby(loc.lat, loc.lon, 100);
+    let radius  = 100;
+    if (!stops.length) {
+      stops  = await fetchNearby(loc.lat, loc.lon, 300);
+      radius = 300;
+    }
+    if (!stops.length) {
+      resultsEl.innerHTML = '<div class="state-msg">Inga hållplatser inom 300 m</div>' + nearbyUpdateLink();
+      return;
+    }
+    const label = radius > 100 ? `Inget inom 100 m — visar inom ${radius} m` : 'Nära dig';
+    resultsEl.innerHTML = `<div class="recents-label">${label}</div>` + stops.map(s => `
+      <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
+        <span class="result-name">${s.name}</span>
+        <span class="result-sub">${s.dist} m</span>
+      </div>`).join('') + nearbyUpdateLink();
+  } catch (e) {
+    resultsEl.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  }
 }
 
 // ── Destination cleanup ───────────────────────────────────────────────────
