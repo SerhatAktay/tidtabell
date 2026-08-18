@@ -108,7 +108,6 @@
 
     .board-name { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
     .board-sub  { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim); }
-    .board-walk { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim); }
 
     /* ── Departure table ────────────────────────────────────── */
     .dep-table { width: 100%; border-collapse: collapse; }
@@ -162,7 +161,6 @@
     }
 
     /* ── Leave-now highlight (home boards only) ────────────────── */
-    .dep-table tr.row-unreachable { opacity: 0.4; }
     .dep-table tr.row-next { box-shadow: inset 3px 0 0 var(--ink); }
 
     .dep-time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
@@ -316,7 +314,6 @@
       <div style="display:flex;align-items:baseline;gap:16px">
         <span class="board-name">Vasalund</span>
         <span class="board-sub">Buss</span>
-        <span class="board-walk" id="walkVasalund"></span>
       </div>
     </div>
     <div id="busBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
@@ -327,7 +324,6 @@
       <div style="display:flex;align-items:baseline;gap:16px">
         <span class="board-name">Solna station</span>
         <span class="board-sub">Pendeltåg</span>
-        <span class="board-walk" id="walkSolna"></span>
       </div>
     </div>
     <div id="trainBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
@@ -338,7 +334,6 @@
       <div style="display:flex;align-items:baseline;gap:16px">
         <span class="board-name">Solna centrum</span>
         <span class="board-sub">T-bana</span>
-        <span class="board-walk" id="walkSolnaC"></span>
       </div>
     </div>
     <div id="metroBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
@@ -388,8 +383,12 @@ setInterval(tickClock, 1000);
 tickClock();
 
 // ── API (all calls go through the Cloudflare proxy) ──────────────────────
-async function fetchDepartures(stopId) {
-  const r = await fetch(`${PROXY_BASE}/departures/${stopId}`);
+// time (optional): 'YYYY-MM-DDTHH:mm' local time — the Trafiklab endpoint's
+// window is a fixed, non-configurable 60 minutes from this point (or from
+// now, if omitted). Used to look further ahead when a board is sparse.
+async function fetchDepartures(stopId, time) {
+  const path = time ? `/departures/${stopId}/${time}` : `/departures/${stopId}`;
+  const r = await fetch(`${PROXY_BASE}${path}`);
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   const d = await r.json();
   if (d.error) throw new Error(d.error);
@@ -632,8 +631,8 @@ function cleanDest(str = '') {
 }
 
 // ── Build departure table ─────────────────────────────────────────────────
-// walkMin: if given (home boards only), rows you can't reach in time are
-// dimmed, and the first reachable one is highlighted with a left accent.
+// walkMin: if given (home boards only), the first departure you can still
+// reach in time is highlighted with a left accent.
 function buildTable(rows, max, walkMin) {
   if (!rows.length) return '<div class="state-msg">Inga avgångar</div>';
   const lim    = max || MAX_ROWS;
@@ -682,9 +681,7 @@ function buildTable(rows, max, walkMin) {
     let rowClass = '';
     if (walkMin != null && !dep.canceled) {
       const minsUntil = (new Date(dep.realtime || dep.scheduled) - now) / 60000;
-      if (minsUntil < walkMin) {
-        rowClass = 'row-unreachable';
-      } else if (!markedNext) {
+      if (minsUntil >= walkMin && !markedNext) {
         rowClass = 'row-next';
         markedNext = true;
       }
@@ -718,37 +715,68 @@ function trainDest(dep) {
 }
 
 // ── Fetch home boards ─────────────────────────────────────────────────────
+// Show every departure in the next hour; if that's fewer than 5, look
+// further ahead (the API's window is a fixed 60 minutes, so this means
+// re-querying with a later `time`) until there are at least 5, or give up.
+async function fetchHomeBoardRows(stopId, filterFn, mapFn) {
+  const deps = await fetchDepartures(stopId);
+  let rows = deps.filter(filterFn).map(mapFn);
+  if (rows.length >= 5) return rows;
+
+  let cursor = new Date();
+  for (let i = 0; i < 4 && rows.length < 5; i++) {
+    cursor = new Date(cursor.getTime() + 60 * 60000);
+    let more;
+    try {
+      more = await fetchDepartures(stopId, apiTimeParam(cursor));
+    } catch {
+      break;
+    }
+    rows = rows.concat(more.filter(filterFn).map(mapFn));
+  }
+  return rows.slice(0, 5);
+}
+
+function apiTimeParam(d) {
+  const p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+}
+
+async function loadHomeBoard(elId, stopId, filterFn, mapFn, walkMin) {
+  const el = document.getElementById(elId);
+  try {
+    const rows = await fetchHomeBoardRows(stopId, filterFn, mapFn);
+    el.innerHTML = buildTable(rows, rows.length, walkMin);
+  } catch (e) {
+    el.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+  }
+}
+
 function fetchAll() {
-  fetchDepartures(VASALUND_ID).then(deps => {
-    const rows = deps
-      .filter(d => d.route?.transport_mode === 'BUS' && busFilter(d))
-      .map(d => {
-        const num  = d.route.designation;
-        const dest = (num === '509' && (d.route.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.route.direction);
-        return [num, dest, d];
-      });
-    document.getElementById('busBoard').innerHTML = buildTable(rows, null, WALK.vasalund);
-  }).catch(e => {
-    document.getElementById('busBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
-  });
+  loadHomeBoard(
+    'busBoard', VASALUND_ID,
+    d => d.route?.transport_mode === 'BUS' && busFilter(d),
+    d => {
+      const num  = d.route.designation;
+      const dest = (num === '509' && (d.route.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.route.direction);
+      return [num, dest, d];
+    },
+    WALK.vasalund
+  );
 
-  fetchDepartures(SOLNA_ID).then(deps => {
-    const rows = deps
-      .filter(d => d.route?.transport_mode === 'TRAIN')
-      .map(d => [d.route.designation, trainDest(d), d]);
-    document.getElementById('trainBoard').innerHTML = buildTable(rows, null, WALK.solna);
-  }).catch(e => {
-    document.getElementById('trainBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
-  });
+  loadHomeBoard(
+    'trainBoard', SOLNA_ID,
+    d => d.route?.transport_mode === 'TRAIN',
+    d => [d.route.designation, trainDest(d), d],
+    WALK.solna
+  );
 
-  fetchDepartures(SOLNA_C_ID).then(deps => {
-    const rows = deps
-      .filter(d => d.route?.transport_mode === 'METRO')
-      .map(d => [d.route.designation, cleanDest(d.route.direction), d]);
-    document.getElementById('metroBoard').innerHTML = buildTable(rows, null, WALK.solnac);
-  }).catch(e => {
-    document.getElementById('metroBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
-  });
+  loadHomeBoard(
+    'metroBoard', SOLNA_C_ID,
+    d => d.route?.transport_mode === 'METRO',
+    d => [d.route.designation, cleanDest(d.route.direction), d],
+    WALK.solnac
+  );
 
   startCountdown();
 }
@@ -872,9 +900,6 @@ setInterval(checkForUpdate, UPDATE_CHECK_MS);
 checkForUpdate();
 
 // ── Boot ──────────────────────────────────────────────────────────────────
-document.getElementById('walkVasalund').textContent = WALK.vasalund + ' min';
-document.getElementById('walkSolna').textContent    = WALK.solna    + ' min';
-document.getElementById('walkSolnaC').textContent   = WALK.solnac   + ' min';
 fetchAll();
 </script>
 </body>
