@@ -10,7 +10,7 @@
     :root {
       --ink:   #0A0A0A;
       --paper: #F5F4EF;
-      --dim:   #777;
+      --dim:   #5c5c5c;
       --rule:  #C8C7C2;
     }
 
@@ -82,6 +82,15 @@
       margin: 0 auto;
     }
     .page.hidden { display: none; }
+
+    @media (min-width: 1000px) {
+      /* Needed because .page.hidden's `display: none` (0 IDs, 2 classes)
+         loses to #mainView's `display: grid` below (1 ID always outranks
+         any number of classes) — without this override the boards stay
+         visible behind the search view at this width. */
+      #mainView.hidden { display: none; }
+      #mainView { max-width: 1400px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+    }
 
     @media (max-width: 600px) {
       .page { padding: 16px; gap: 20px; }
@@ -161,7 +170,8 @@
     }
 
     /* ── Leave-now highlight (home boards only) ────────────────── */
-    .dep-table tr.row-next { box-shadow: inset 3px 0 0 var(--ink); }
+    .dep-table tr.row-next { background: rgba(10,10,10,0.05); box-shadow: inset 4px 0 0 var(--ink); }
+    .dep-table tr.row-cancel { opacity: 0.5; }
 
     .dep-time { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; }
     .dep-time.now  { background: var(--ink); color: var(--paper); padding: 2px 6px; font-size: 13px; letter-spacing: 1px; }
@@ -172,10 +182,10 @@
     .dep-delta {
       display: block;
       margin-top: 3px;
-      font-size: 10px;
-      font-weight: 600;
+      font-size: 11px;
+      font-weight: 700;
       letter-spacing: 0.3px;
-      color: var(--dim);
+      color: var(--ink);
       font-variant-numeric: tabular-nums;
     }
     button.dep-delta {
@@ -279,7 +289,16 @@
     /* Results/recents/nearby lists render inside #searchResults, separated
        from the search field above by the page's flex gap — without this,
        the list has no visible top edge. */
-    #searchResults > *:first-child { border-top: 2px solid var(--ink); }
+    #nearbyTrigger { border-top: 2px solid var(--ink); }
+
+    /* Closes the top of a results/recents/nearby list. Excludes
+       .recents-label so the border lands on the first real row, not
+       on the label text above it (which isn't itself bordered). */
+    #searchResults > *:first-child:not(.recents-label),
+    .recents-label + .result-item,
+    .recents-label + .nearby-btn {
+      border-top: 2px solid var(--ink);
+    }
 
   </style>
 </head>
@@ -346,7 +365,7 @@
   <div class="search-field">
     <input type="text" id="searchInput" placeholder="Sök hållplats…" autocomplete="off" oninput="onSearchInput()">
   </div>
-  <button type="button" class="nearby-btn" onclick="findNearby()">
+  <button type="button" class="nearby-btn" id="nearbyTrigger" onclick="findNearby()">
     <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
       <path d="M10 18 C10 18 16 12.5 16 8 a6 6 0 1 0 -12 0 C4 12.5 10 18 10 18 Z"/>
       <circle cx="10" cy="8" r="2.2"/>
@@ -367,8 +386,9 @@ const VASALUND_ID = '740066635';
 const SOLNA_ID    = '740000759';
 const SOLNA_C_ID  = '740021642';
 const WALK        = { vasalund: 3, solna: 10, solnac: 14 };
-const REFRESH_SEC = 30;
-const MAX_ROWS    = 4;
+const REFRESH_SEC  = 30;
+const MAX_ROWS     = 4;
+const MAX_PER_LINE = 2;  // cap repeats of the same line+destination on a board
 
 let countdown    = REFRESH_SEC;
 let timer        = null;
@@ -630,13 +650,29 @@ function cleanDest(str = '') {
     .trim();
 }
 
+// ── Repeat cap ────────────────────────────────────────────────────────────
+// A frequent line (e.g. a pendeltåg line running every few minutes) would
+// otherwise fill the whole board with repeats of itself. Keep at most
+// MAX_PER_LINE departures per line+destination — enough to see "this one"
+// and "the next one" — preserving chronological order.
+function capRepeats(rows, limitPerKey) {
+  const seen = new Map();
+  return rows.filter(([num, dest]) => {
+    const key = num + '|' + dest;
+    const count = seen.get(key) || 0;
+    if (count >= limitPerKey) return false;
+    seen.set(key, count + 1);
+    return true;
+  });
+}
+
 // ── Build departure table ─────────────────────────────────────────────────
 // walkMin: if given (home boards only), the first departure you can still
 // reach in time is highlighted with a left accent.
 function buildTable(rows, max, walkMin) {
   if (!rows.length) return '<div class="state-msg">Inga avgångar</div>';
   const lim    = max || MAX_ROWS;
-  const sliced = rows.slice(0, lim);
+  const sliced = capRepeats(rows, MAX_PER_LINE).slice(0, lim);
   const now    = new Date();
   const nowHr  = now.getHours() + now.getMinutes() / 60;
   const isLateEvening = nowHr >= 21 || nowHr < 3;
@@ -678,7 +714,7 @@ function buildTable(rows, max, walkMin) {
       if (!hasLater) lastHtml = `<span class="dep-last">Inga fler inom en timme</span>`;
     }
 
-    let rowClass = '';
+    let rowClass = dep.canceled ? 'row-cancel' : '';
     if (walkMin != null && !dep.canceled) {
       const minsUntil = (new Date(dep.realtime || dep.scheduled) - now) / 60000;
       if (minsUntil >= walkMin && !markedNext) {
@@ -688,7 +724,7 @@ function buildTable(rows, max, walkMin) {
     }
 
     const metroColor = dep.route?.transport_mode === 'METRO' ? METRO_LINE_COLORS[dep.route.designation] : null;
-    const lineStyle = metroColor ? ` style="box-shadow: inset 0 -3px 0 ${metroColor};"` : '';
+    const lineStyle = metroColor ? ` style="background:${metroColor};"` : '';
 
     return `<tr class="${rowClass}">
       <td class="col-line"><span class="line-num"${lineStyle}>${num}</span></td>
@@ -715,13 +751,15 @@ function trainDest(dep) {
 }
 
 // ── Fetch home boards ─────────────────────────────────────────────────────
-// Show every departure in the next hour; if that's fewer than 5, look
-// further ahead (the API's window is a fixed 60 minutes, so this means
-// re-querying with a later `time`) until there are at least 5, or give up.
+// Show every departure in the next hour, capped to MAX_PER_LINE per
+// line+destination so one frequent line doesn't crowd out the rest. If
+// that leaves fewer than 5 rows, look further ahead (the API's window is a
+// fixed 60 minutes, so this means re-querying with a later `time`) until
+// there are at least 5 (post-cap), or give up.
 async function fetchHomeBoardRows(stopId, filterFn, mapFn) {
   const deps = await fetchDepartures(stopId);
-  let rows = deps.filter(filterFn).map(mapFn);
-  if (rows.length >= 5) return rows;
+  let rows = capRepeats(deps.filter(filterFn).map(mapFn), MAX_PER_LINE);
+  if (rows.length >= 5) return rows.slice(0, 5);
 
   let cursor = new Date();
   for (let i = 0; i < 4 && rows.length < 5; i++) {
@@ -732,7 +770,7 @@ async function fetchHomeBoardRows(stopId, filterFn, mapFn) {
     } catch {
       break;
     }
-    rows = rows.concat(more.filter(filterFn).map(mapFn));
+    rows = capRepeats(rows.concat(more.filter(filterFn).map(mapFn)), MAX_PER_LINE);
   }
   return rows.slice(0, 5);
 }
