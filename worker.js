@@ -67,7 +67,7 @@ async function handleRequest(request) {
 }
 
 // /journey?stop=<extId>&line=<designation>&dir=<direction>&time=<scheduled ISO>
-// -> { stops: [{ name, lat, lon }, ...] }  (empty if no departure matched)
+// -> { stops: [{ name, lat, lon, time }, ...] }  (time = "HH:MM", may be empty)  (empty if no departure matched)
 async function journey(url) {
   const q = k => url.searchParams.get(k) || '';
   const [stop, line, dir, time] = ['stop', 'line', 'dir', 'time'].map(q);
@@ -92,7 +92,8 @@ async function journey(url) {
     const hit = hits.find(d => key && (d.direction || '').toLowerCase().includes(key)) || hits[0];
     const raw = hit?.Stops?.Stop || [];
     const stops = (Array.isArray(raw) ? raw : [raw])
-      .map(s => ({ name: s.name, lat: +s.lat, lon: +s.lon }))
+      .map(s => ({ name: s.name, lat: +s.lat, lon: +s.lon,
+                  time: (s.rtDepTime || s.depTime || s.rtArrTime || s.arrTime || '').slice(0, 5) }))
       .filter(s => isFinite(s.lat) && isFinite(s.lon));
     return json({ stops });
   } catch (e) {

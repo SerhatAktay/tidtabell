@@ -1043,7 +1043,7 @@ async function openMap(d) {
   mapLayer.clearLayers();
   map.invalidateSize();
   map.setView(here, 15);
-  L.circleMarker(here, { radius: 9, color: '#0A0A0A', weight: 3, fillColor: '#F5F4EF', fillOpacity: 1 })
+  const hereMarker = L.circleMarker(here, { radius: 9, color: '#0A0A0A', weight: 3, fillColor: '#F5F4EF', fillOpacity: 1 })
     .addTo(mapLayer);
   msg.textContent = 'Hämtar rutt…';
 
@@ -1063,6 +1063,8 @@ async function openMap(d) {
   const dist = s => (s.lat - here[0]) ** 2 + (s.lon - here[1]) ** 2;
   const idx = stops.reduce((best, s, i) => dist(s) < dist(stops[best]) ? i : best, 0);
   const pts = stops.map(s => [s.lat, s.lon]);
+  const label = s => escapeHtml(s.time ? `${s.name} ${s.time}` : s.name);
+  hereMarker.bindTooltip(label(stops[idx]), { permanent: true, direction: 'top' });
 
   L.polyline(pts.slice(0, idx + 1), { color: '#999', weight: 4, dashArray: '6 8' }).addTo(mapLayer);
   L.polyline(pts.slice(idx), { color: '#0A0A0A', weight: 5 }).addTo(mapLayer);
@@ -1070,10 +1072,10 @@ async function openMap(d) {
     if (i === idx) return;
     const ahead = i > idx;
     L.circleMarker(pts[i], { radius: 4, color: '#0A0A0A', weight: 2, fillColor: ahead ? '#F5F4EF' : '#ccc', fillOpacity: 1 })
-      .bindTooltip(escapeHtml(s.name), { direction: 'top' })
+      .bindTooltip(label(s), { direction: 'top' })
       .addTo(mapLayer);
   });
-  L.marker(pts[stops.length - 1]).bindTooltip(escapeHtml(stops[stops.length - 1].name), { permanent: true, direction: 'top' })
+  L.marker(pts[stops.length - 1]).bindTooltip(label(stops[stops.length - 1]), { permanent: true, direction: 'top' })
     .addTo(mapLayer);
   map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
 }
