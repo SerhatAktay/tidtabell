@@ -4,10 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Avgångar</title>
-  <!-- Favicon: three paper-colored bars on ink, echoing the board itself
-       (rows of a timetable) rather than a generic transit glyph. Solid
-       rectangles read fine at 16px, unlike anything with fine detail. -->
-  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAzMiAzMiI+CjxyZWN0IHdpZHRoPSIzMiIgaGVpZ2h0PSIzMiIgcng9IjUiIGZpbGw9IiMwQTBBMEEiLz4KPHJlY3QgeD0iNiIgeT0iNyIgd2lkdGg9IjIwIiBoZWlnaHQ9IjQiIGZpbGw9IiNGNUY0RUYiLz4KPHJlY3QgeD0iNiIgeT0iMTQiIHdpZHRoPSIxNCIgaGVpZ2h0PSI0IiBmaWxsPSIjRjVGNEVGIi8+CjxyZWN0IHg9IjYiIHk9IjIxIiB3aWR0aD0iMjAiIGhlaWdodD0iNCIgZmlsbD0iI0Y1RjRFRiIvPgo8L3N2Zz4=">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="apple-touch-icon" href="apple-touch-icon.png">
+  <link rel="manifest" href="manifest.webmanifest">
+  <meta name="theme-color" content="#0A0A0A">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="Avgångar">
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
@@ -71,8 +73,14 @@
     }
     .search-btn:hover { opacity: 1; }
 
-    .refresh-dot { cursor: pointer; opacity: 0.7; transition: opacity 0.2s; flex-shrink: 0; }
-    .refresh-dot:hover { opacity: 1; }
+    .refresh-dot { flex-shrink: 0; }
+
+    :focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+    header :focus-visible { outline-color: var(--paper); }
+    @media (prefers-reduced-motion: reduce) {
+      .dot-anim::after { animation: none; content: '…'; }
+      #progressArc { transition: none !important; }
+    }
 
     /* ── Shared page wrapper ────────────────────────────────── */
     .page {
@@ -118,6 +126,16 @@
       justify-content: space-between;
       gap: 12px;
     }
+    /* Home boards: header is a button that collapses the board. */
+    button.board-head {
+      width: 100%; background: none; border-top: none; border-left: none; border-right: none;
+      font: inherit; color: inherit; text-align: left; cursor: pointer;
+    }
+    .board-titles { display: flex; align-items: baseline; gap: 16px; }
+    .board-chev { transition: transform 0.15s; font-size: 12px; }
+    .board.collapsed .board-chev { transform: rotate(-90deg); }
+    .board.collapsed .board-head { border-bottom: none; }
+    .board.collapsed > :not(.board-head) { display: none; }
 
     .board-name { font-size: 13px; font-weight: 700; letter-spacing: 2px; text-transform: uppercase; }
     .board-sub  { font-size: 11px; letter-spacing: 1.5px; text-transform: uppercase; color: var(--dim); }
@@ -224,6 +242,12 @@
     .alert-text  { font-size: 12px; line-height: 1.4; color: var(--ink); }
 
     /* ── State / loading ────────────────────────────────────── */
+    .stale { opacity: 0.45; }
+    .stale-note {
+      padding: 8px 20px; font-size: 11px; letter-spacing: 1px;
+      text-transform: uppercase; color: var(--dim);
+      border-bottom: 1px solid var(--rule);
+    }
     .state-msg {
       padding: 28px 20px; text-align: center;
       font-size: 12px; letter-spacing: 1px;
@@ -260,8 +284,16 @@
     .nearby-btn:hover { background: var(--ink); color: var(--paper); }
     .nearby-btn svg { flex-shrink: 0; }
 
+    #clearBtn {
+      background: none; border: none; cursor: pointer;
+      color: var(--dim); font-size: 26px; font-weight: 200;
+      line-height: 1; padding: 0 18px;
+    }
+    #clearBtn:hover { color: var(--ink); }
+    #clearBtn[hidden] { display: none; }
+
     #searchInput {
-      flex: 1;
+      flex: 1; min-width: 0;
       border: none; outline: none;
       background: var(--paper); color: var(--ink);
       font-family: inherit;
@@ -272,6 +304,7 @@
 
     /* ── Search results list ────────────────────────────────── */
     .result-item {
+      width: 100%; background: none; font: inherit; color: inherit; text-align: left;
       border: 2px solid var(--ink);
       border-top: none;
       padding: 12px 20px;
@@ -311,22 +344,24 @@
 
 <header>
   <div class="h-left">
-    <button id="backBtn" onclick="goBack()">‹</button>
+    <button id="backBtn" onclick="goBack()" aria-label="Tillbaka">‹</button>
     <span id="clock"></span>
   </div>
   <div class="h-right">
-    <button class="search-btn" id="searchBtn" onclick="showSearch()" title="Sök hållplats">
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+    <button class="search-btn" id="searchBtn" onclick="showSearch()" title="Sök hållplats" aria-label="Sök hållplats">
+      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
         <circle cx="8.5" cy="8.5" r="5.5"/>
         <line x1="12.5" y1="12.5" x2="18" y2="18"/>
       </svg>
     </button>
-    <svg class="refresh-dot" width="20" height="20" viewBox="0 0 20 20" style="cursor:default">
+    <button class="search-btn" id="refreshBtn" onclick="fetchAll()" title="Uppdatera" aria-label="Uppdatera">
+    <svg class="refresh-dot" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.25)" stroke-width="1.5"/>
       <circle id="progressArc" cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.9)" stroke-width="1.5"
               stroke-dasharray="43.98" stroke-dashoffset="0"
               transform="rotate(-90 10 10)" style="transition: stroke-dashoffset 1s linear;"/>
     </svg>
+    </button>
   </div>
 </header>
 
@@ -334,32 +369,35 @@
 <div class="page" id="mainView">
 
   <div class="board">
-    <div class="board-head">
-      <div style="display:flex;align-items:baseline;gap:16px">
+    <button type="button" class="board-head" data-board="busBoard" aria-expanded="true">
+      <span class="board-titles">
         <span class="board-name">Vasalund</span>
         <span class="board-sub">Buss</span>
-      </div>
-    </div>
+      </span>
+      <span class="board-chev" aria-hidden="true">▾</span>
+    </button>
     <div id="busBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
   </div>
 
   <div class="board">
-    <div class="board-head">
-      <div style="display:flex;align-items:baseline;gap:16px">
+    <button type="button" class="board-head" data-board="trainBoard" aria-expanded="true">
+      <span class="board-titles">
         <span class="board-name">Solna station</span>
         <span class="board-sub">Pendeltåg</span>
-      </div>
-    </div>
+      </span>
+      <span class="board-chev" aria-hidden="true">▾</span>
+    </button>
     <div id="trainBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
   </div>
 
   <div class="board">
-    <div class="board-head">
-      <div style="display:flex;align-items:baseline;gap:16px">
+    <button type="button" class="board-head" data-board="metroBoard" aria-expanded="true">
+      <span class="board-titles">
         <span class="board-name">Solna centrum</span>
         <span class="board-sub">T-bana</span>
-      </div>
-    </div>
+      </span>
+      <span class="board-chev" aria-hidden="true">▾</span>
+    </button>
     <div id="metroBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
   </div>
 
@@ -368,10 +406,11 @@
 <!-- ── Search view ───────────────────────────────────────────── -->
 <div class="page hidden" id="searchView">
   <div class="search-field">
-    <input type="text" id="searchInput" placeholder="Sök hållplats…" autocomplete="off" oninput="onSearchInput()">
+    <input type="text" id="searchInput" placeholder="Sök hållplats…" aria-label="Sök hållplats" autocomplete="off" oninput="onSearchInput()">
+    <button type="button" id="clearBtn" hidden aria-label="Rensa" onclick="clearSearch()">×</button>
   </div>
   <button type="button" class="nearby-btn" id="nearbyTrigger" onclick="findNearby()">
-    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
       <path d="M10 18 C10 18 16 12.5 16 8 a6 6 0 1 0 -12 0 C4 12.5 10 18 10 18 Z"/>
       <circle cx="10" cy="8" r="2.2"/>
     </svg>
@@ -499,11 +538,14 @@ function deltaInfo(dep) {
   const sec = dep.delay || 0;
   if (Math.abs(sec) < 60) return null;
   const mins = Math.round(sec / 60);
-  return (mins > 0 ? '+' : '') + mins + ' min';
+  const clock = new Date(dep.realtime || dep.scheduled)
+    .toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
+  return `${clock} (${mins > 0 ? '+' : ''}${mins})`;
 }
 
 function escapeHtml(str) {
-  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
 }
 
 function renderAlerts(alerts) {
@@ -546,6 +588,16 @@ function platformOf(dep) {
   return dep.realtime_platform?.designation || dep.scheduled_platform?.designation || '';
 }
 
+// ── Stop rows (search results, recents, nearby) ─────────────────────────────
+// <button> so rows are keyboard-focusable; name goes through data-* rather
+// than an inline onclick string, so quotes/backslashes in names are safe.
+function stopRow(s, sub) {
+  return `<button type="button" class="result-item" data-id="${escapeHtml(s.extId)}" data-name="${escapeHtml(s.name)}">
+    <span class="result-name">${escapeHtml(s.name)}</span>
+    <span class="result-sub">${escapeHtml(sub)}</span>
+  </button>`;
+}
+
 // ── Recent stops (localStorage) ─────────────────────────────────────────────
 const RECENTS_KEY = 'tidtabell_recents_v1';
 
@@ -563,11 +615,7 @@ function saveRecent(stop) {
 function renderRecents() {
   const list = loadRecents();
   if (!list.length) return '';
-  return `<div class="recents-label">Senaste</div>` + list.map(s => `
-    <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
-      <span class="result-name">${s.name}</span>
-      <span class="result-sub">${s.extId}</span>
-    </div>`).join('');
+  return `<div class="recents-label">Senaste</div>` + list.map(s => stopRow(s, s.extId)).join('');
 }
 
 // ── Your location (setting) + nearby stops ──────────────────────────────────
@@ -608,11 +656,7 @@ function renderNearbyList(stops, nearLabel, footerHtml = '') {
   if (!stops.length) {
     return '<div class="state-msg">Inga hållplatser inom 300 m</div>' + footerHtml;
   }
-  return `<div class="recents-label">${nearLabel}</div>` + stops.map(s => `
-    <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
-      <span class="result-name">${s.name}</span>
-      <span class="result-sub">${s.dist} m</span>
-    </div>`).join('') + footerHtml;
+  return `<div class="recents-label">${nearLabel}</div>` + stops.map(s => stopRow(s, s.dist + ' m')).join('') + footerHtml;
 }
 
 async function findNearby(forceRefresh) {
@@ -626,7 +670,7 @@ async function findNearby(forceRefresh) {
       loc = await getCurrentPosition();
       saveLocation(loc);
     } catch (e) {
-      resultsEl.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+      resultsEl.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>`;
       return;
     }
   }
@@ -636,7 +680,7 @@ async function findNearby(forceRefresh) {
     const stops = await fetchNearby(loc.lat, loc.lon, 300);
     resultsEl.innerHTML = renderNearbyList(stops, 'Nära dig', nearbyUpdateLink());
   } catch (e) {
-    resultsEl.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+    resultsEl.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -688,12 +732,13 @@ function buildTable(rows, max, walkMin) {
   const body = sliced.map(([num, dest, dep]) => {
     const { text, cls } = calcDisplay(dep);
     const icon  = showIcons ? modeIcon(dep.route?.transport_mode) : '';
-    const delta = deltaInfo(dep);
+    const alerts = dep.alerts || [];
+    // Delayed: "12:07 (+3)". Cancelled: "Orsak" if the API gave a reason.
+    const delta = dep.canceled ? (alerts.length ? 'Orsak' : null) : deltaInfo(dep);
     const plat  = platformOf(dep);
 
     let deltaHtml = '';
     if (delta) {
-      const alerts = dep.alerts || [];
       if (alerts.length) {
         const id = `pop-${++popoverSeq}`;
         deltaHtml = `<button type="button" class="dep-delta" onclick="toggleAlert(event, '${id}')">${delta}</button>
@@ -734,8 +779,8 @@ function buildTable(rows, max, walkMin) {
     const lineStyle = metroColor ? ` style="background:${metroColor};"` : '';
 
     return `<tr class="${rowClass}">
-      <td class="col-line"><span class="line-num"${lineStyle}>${num}</span></td>
-      <td>${icon ? `<span class="mode-icon">${icon}</span>` : ''}<span class="dest-wrap"><span class="dest-text">${dest}</span>${platHtml}${lastHtml}</span></td>
+      <td class="col-line"><span class="line-num"${lineStyle}>${escapeHtml(num)}</span></td>
+      <td>${icon ? `<span class="mode-icon" aria-hidden="true">${icon}</span>` : ''}<span class="dest-wrap"><span class="dest-text">${escapeHtml(dest)}</span>${platHtml}${lastHtml}</span></td>
       <td class="col-time"><span class="dep-time ${cls}">${text}</span>${deltaHtml}</td>
     </tr>`;
   }).join('');
@@ -787,13 +832,23 @@ function apiTimeParam(d) {
   return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
 }
 
+// On a failed refresh, keep the last good board (dimmed, with a note) instead
+// of wiping it — a glance at a stale board beats a bare error.
+// ponytail: in-memory only, so offline first load after a reload still shows the error.
+const lastGood = {};
+
 async function loadHomeBoard(elId, stopId, filterFn, mapFn, walkMin) {
   const el = document.getElementById(elId);
   try {
     const rows = await fetchHomeBoardRows(stopId, filterFn, mapFn);
-    el.innerHTML = buildTable(rows, rows.length, walkMin);
+    const html = buildTable(rows, rows.length, walkMin);
+    lastGood[elId] = { html, at: new Date() };
+    el.innerHTML = html;
   } catch (e) {
-    el.innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+    const g = lastGood[elId];
+    el.innerHTML = g
+      ? `<div class="stale-note">⚠ Uppdaterad ${g.at.toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' })} · ${escapeHtml(e.message)}</div><div class="stale">${g.html}</div>`
+      : `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -844,27 +899,88 @@ function updateArc() {
     CIRC * (1 - countdown / REFRESH_SEC);
 }
 
+// Stop polling while the tab is hidden; refresh immediately on return.
+document.addEventListener('visibilitychange', () => {
+  if (document.hidden) clearInterval(timer);
+  else fetchAll();
+});
+
+// ── Board collapse (persisted) ────────────────────────────────────────────
+const COLLAPSED_KEY = 'tidtabell_collapsed_v1';
+
+function initBoardToggles() {
+  let state = {};
+  try { state = JSON.parse(localStorage.getItem(COLLAPSED_KEY)) || {}; } catch {}
+  document.querySelectorAll('.board-head[data-board]').forEach(head => {
+    const board = head.parentElement;
+    const apply = collapsed => {
+      board.classList.toggle('collapsed', collapsed);
+      head.setAttribute('aria-expanded', String(!collapsed));
+    };
+    apply(!!state[head.dataset.board]);
+    head.addEventListener('click', () => {
+      const collapsed = !board.classList.contains('collapsed');
+      apply(collapsed);
+      state[head.dataset.board] = collapsed;
+      try { localStorage.setItem(COLLAPSED_KEY, JSON.stringify(state)); } catch {}
+    });
+  });
+}
+
 // ── View switching ────────────────────────────────────────────────────────
+// Search is a history entry so the phone's back gesture / Esc closes it
+// instead of leaving the page.
 function showSearch() {
+  history.pushState({ search: true }, '');
+  openSearch();
+}
+
+function goBack() {
+  if (history.state?.search) history.back(); // popstate closes the view
+  else closeSearch();
+}
+
+window.addEventListener('popstate', () => {
+  if (history.state?.search) openSearch(); else closeSearch();
+});
+
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && !document.getElementById('searchView').classList.contains('hidden')) goBack();
+});
+
+function openSearch() {
   document.getElementById('mainView').classList.add('hidden');
   document.getElementById('searchView').classList.remove('hidden');
   document.getElementById('backBtn').classList.add('visible');
   document.getElementById('searchInput').value = '';
+  document.getElementById('clearBtn').hidden = true;
+  searchSeq++;
   document.getElementById('searchResults').innerHTML = renderRecents();
   document.getElementById('stopBoard').innerHTML = '';
   document.getElementById('searchInput').focus();
 }
 
-function goBack() {
+function closeSearch() {
   document.getElementById('searchView').classList.add('hidden');
   document.getElementById('mainView').classList.remove('hidden');
   document.getElementById('backBtn').classList.remove('visible');
 }
 
 // ── Stop search ───────────────────────────────────────────────────────────
+let searchSeq = 0; // bumps on every keystroke; a slow older response sees a newer seq and drops itself
+
+function clearSearch() {
+  const input = document.getElementById('searchInput');
+  input.value = '';
+  onSearchInput();
+  input.focus();
+}
+
 function onSearchInput() {
   clearTimeout(searchTimer);
+  searchSeq++;
   const q = document.getElementById('searchInput').value.trim();
+  document.getElementById('clearBtn').hidden = !document.getElementById('searchInput').value;
   document.getElementById('stopBoard').innerHTML = '';
   if (!q) { document.getElementById('searchResults').innerHTML = renderRecents(); return; }
   document.getElementById('searchResults').innerHTML =
@@ -873,21 +989,19 @@ function onSearchInput() {
 }
 
 async function doSearch(q) {
+  const seq = ++searchSeq;
   try {
     const stops = await searchStops(q);
+    if (seq !== searchSeq) return;
     if (!stops.length) {
       document.getElementById('searchResults').innerHTML =
         '<div class="state-msg">Inga hållplatser hittades</div>';
       return;
     }
-    document.getElementById('searchResults').innerHTML = stops.map(s => `
-      <div class="result-item" onclick="showStopDepartures('${s.extId}', '${s.name.replace(/'/g,"\\'")}')">
-        <span class="result-name">${s.name}</span>
-        <span class="result-sub">${s.extId}</span>
-      </div>`).join('');
+    document.getElementById('searchResults').innerHTML = stops.map(s => stopRow(s, s.extId)).join('');
   } catch(e) {
     document.getElementById('searchResults').innerHTML =
-      `<div class="state-msg">⚠ ${e.message}</div>`;
+      `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -898,11 +1012,12 @@ async function showStopDepartures(extId, name) {
   document.getElementById('stopBoard').innerHTML = `
     <div class="board">
       <div class="board-head">
-        <span class="board-name">${name}</span>
+        <span class="board-name">${escapeHtml(name)}</span>
       </div>
       <div id="dynBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
     </div>`;
 
+  const el = document.getElementById('dynBoard'); // captured: view may change while fetching
   try {
     const deps = await fetchDepartures(extId);
     const rows = deps.map(d => [
@@ -910,9 +1025,9 @@ async function showStopDepartures(extId, name) {
       cleanDest(d.route?.direction),
       d
     ]);
-    document.getElementById('dynBoard').innerHTML = buildTable(rows, 8);
+    el.innerHTML = buildTable(rows, 8);
   } catch(e) {
-    document.getElementById('dynBoard').innerHTML = `<div class="state-msg">⚠ ${e.message}</div>`;
+    el.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -945,7 +1060,14 @@ setInterval(checkForUpdate, UPDATE_CHECK_MS);
 checkForUpdate();
 
 // ── Boot ──────────────────────────────────────────────────────────────────
+if (history.state?.search) history.replaceState(null, ''); // reload lands on main view
+document.getElementById('searchResults').addEventListener('click', e => {
+  const row = e.target.closest('.result-item');
+  if (row) showStopDepartures(row.dataset.id, row.dataset.name);
+});
+initBoardToggles();
 fetchAll();
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
 </html>
