@@ -17,7 +17,8 @@
  *
  * /journey reuses RESROBOT_KEY: it finds a departure on ResRobot's
  * departureBoard (the Realtime API's trip_id is not a ResRobot id) and
- * returns that journey's stops with coordinates, for the map view.
+ * returns the stops it passes, with coordinates, for the map view. Uses
+ * departureBoard's passlist=1 — v2.1 has no journeyDetail endpoint.
  *
  * After saving, go to Settings → Variables and add both.
  *
@@ -75,7 +76,7 @@ async function journey(url) {
   try {
     const board = await (await fetch(`${RESROBOT}/departureBoard?` + new URLSearchParams({
       id: stop, date: time.slice(0, 10), time: time.slice(11, 16),
-      duration: 30, maxJourneys: 40, format: 'json', accessId: RESROBOT_KEY,
+      dur: 30, passlist: 1, format: 'json', accessId: RESROBOT_KEY,
     }))).json();
 
     const mins = t => +t.slice(0, 2) * 60 + +t.slice(3, 5);
@@ -89,13 +90,7 @@ async function journey(url) {
     // Prefer the entry heading the same way; fall back to the first line+time match.
     const key = dir.slice(0, 5).toLowerCase();
     const hit = hits.find(d => key && (d.direction || '').toLowerCase().includes(key)) || hits[0];
-    const ref = hit?.JourneyDetailRef?.ref;
-    if (!ref) return json({ stops: [] });
-
-    const detail = await (await fetch(`${RESROBOT}/journeyDetail?` + new URLSearchParams({
-      id: ref, format: 'json', accessId: RESROBOT_KEY,
-    }))).json();
-    const raw = detail.Stops?.Stop || [];
+    const raw = hit?.Stops?.Stop || [];
     const stops = (Array.isArray(raw) ? raw : [raw])
       .map(s => ({ name: s.name, lat: +s.lat, lon: +s.lon }))
       .filter(s => isFinite(s.lat) && isFinite(s.lon));
