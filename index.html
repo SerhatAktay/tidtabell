@@ -7,6 +7,8 @@
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
   <link rel="manifest" href="manifest.webmanifest">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css">
+  <script defer src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
   <meta name="theme-color" content="#0A0A0A">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-title" content="Avgångar">
@@ -244,6 +246,38 @@
     .alert-text  { font-size: 12px; line-height: 1.4; color: var(--ink); }
 
     /* ── State / loading ────────────────────────────────────── */
+    tr[data-stop] { cursor: pointer; }
+    tr[data-stop]:hover { background: rgba(10,10,10,0.03); }
+
+    /* ── Map sheet ──────────────────────────────────────────── */
+    .map-sheet {
+      position: fixed; inset: 0; z-index: 50;
+      display: flex; flex-direction: column;
+      background: var(--paper);
+    }
+    .map-sheet[hidden] { display: none; }
+    .map-head {
+      background: var(--ink); color: var(--paper);
+      padding: 12px 16px;
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      flex-shrink: 0;
+    }
+    .map-title { display: flex; align-items: center; gap: 12px; min-width: 0; }
+    .map-title .line-num { background: var(--paper); color: var(--ink); flex-shrink: 0; }
+    #mapDest { font-size: 15px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    #mapClose {
+      background: none; border: none; color: var(--paper);
+      font-size: 32px; font-weight: 200; line-height: 1; cursor: pointer; padding: 0 4px;
+    }
+    #map { flex: 1; min-height: 0; }
+    .map-msg {
+      position: absolute; left: 0; right: 0; bottom: 0; z-index: 1000;
+      padding: 12px 16px; text-align: center;
+      font-size: 12px; letter-spacing: 1px; text-transform: uppercase;
+      background: var(--paper); border-top: 2px solid var(--ink);
+    }
+    .map-msg:empty { display: none; }
+
     .stale { opacity: 0.45; }
     .stale-note {
       padding: 8px 20px; font-size: 11px; letter-spacing: 1px;
@@ -422,6 +456,16 @@
   <div id="stopBoard"></div>
 </div>
 
+
+<!-- ── Map sheet ─────────────────────────────────────────────── -->
+<div class="map-sheet" id="mapSheet" hidden role="dialog" aria-modal="true" aria-label="Rutt på karta">
+  <div class="map-head">
+    <div class="map-title"><span class="line-num" id="mapLine"></span><span id="mapDest"></span></div>
+    <button type="button" id="mapClose" aria-label="Stäng" onclick="history.back()">×</button>
+  </div>
+  <div id="map"></div>
+  <div class="map-msg" id="mapMsg" role="status"></div>
+</div>
 
 <script>
 // ── Config ────────────────────────────────────────────────────────────────
@@ -718,7 +762,7 @@ function capRepeats(rows, limitPerKey) {
 // ── Build departure table ─────────────────────────────────────────────────
 // walkMin: if given (home boards only), the first departure you can still
 // reach in time is highlighted with a left accent.
-function buildTable(rows, max, walkMin) {
+function buildTable(rows, max, walkMin, stopId) {
   if (!rows.length) return '<div class="state-msg">Inga avgångar</div>';
   const lim    = max || MAX_ROWS;
   const sliced = capRepeats(rows, MAX_PER_LINE).slice(0, lim);
@@ -780,7 +824,13 @@ function buildTable(rows, max, walkMin) {
     const metroColor = dep.route?.transport_mode === 'METRO' ? METRO_LINE_COLORS[dep.route.designation] : null;
     const lineStyle = metroColor ? ` style="background:${metroColor};"` : '';
 
-    return `<tr class="${rowClass}">
+    // Tappable → map. Needs the queried stop id (for ResRobot lookup) and the
+    // boarding stop's coordinates (fallback pin + which stop is "yours").
+    const tap = (!dep.canceled && stopId && dep.stop?.lat != null)
+      ? ` data-stop="${escapeHtml(stopId)}" data-line="${escapeHtml(dep.route?.designation)}" data-dir="${escapeHtml(dep.route?.direction)}" data-time="${escapeHtml(dep.scheduled)}" data-dest="${escapeHtml(dest)}" data-lat="${dep.stop.lat}" data-lon="${dep.stop.lon}" tabindex="0" role="button" aria-label="Visa rutt på karta"`
+      : '';
+
+    return `<tr class="${rowClass}"${tap}>
       <td class="col-line"><span class="line-num"${lineStyle}>${escapeHtml(num)}</span></td>
       <td>${icon ? `<span class="mode-icon" aria-hidden="true">${icon}</span>` : ''}<span class="dest-wrap"><span class="dest-text">${escapeHtml(dest)}</span>${platHtml}${lastHtml}</span></td>
       <td class="col-time"><span class="dep-time ${cls}">${text}</span>${deltaHtml}</td>
@@ -843,7 +893,7 @@ async function loadHomeBoard(elId, stopId, filterFn, mapFn, walkMin) {
   const el = document.getElementById(elId);
   try {
     const rows = await fetchHomeBoardRows(stopId, filterFn, mapFn);
-    const html = buildTable(rows, rows.length, walkMin);
+    const html = buildTable(rows, rows.length, walkMin, stopId);
     lastGood[elId] = { html, at: new Date() };
     el.innerHTML = html;
   } catch (e) {
@@ -942,13 +992,91 @@ function goBack() {
   else closeSearch();
 }
 
+// State is { search, map }. The map sheet sits on top of whatever view opened
+// it, so leaving it must not re-open (and reset) the search view underneath.
 window.addEventListener('popstate', () => {
-  if (history.state?.search) openSearch(); else closeSearch();
+  const st = history.state || {};
+  setMapVisible(!!st.map);
+  if (st.map) return;
+  const searchHidden = document.getElementById('searchView').classList.contains('hidden');
+  if (st.search && searchHidden) openSearch();
+  else if (!st.search && !searchHidden) closeSearch();
 });
 
 document.addEventListener('keydown', e => {
-  if (e.key === 'Escape' && !document.getElementById('searchView').classList.contains('hidden')) goBack();
+  if (e.key === 'Enter' && e.target.matches?.('tr[data-stop]')) { openMap(e.target.dataset); return; }
+  if (e.key !== 'Escape') return;
+  if (!document.getElementById('mapSheet').hidden) history.back();
+  else if (!document.getElementById('searchView').classList.contains('hidden')) goBack();
 });
+
+document.addEventListener('click', e => {
+  if (e.target.closest('.dep-delta, .popover')) return;
+  const row = e.target.closest('tr[data-stop]');
+  if (row) openMap(row.dataset);
+});
+
+// ── Route map (Leaflet + OpenStreetMap) ───────────────────────────────────
+let map = null, mapLayer = null, mapSeq = 0;
+
+function setMapVisible(on) {
+  document.getElementById('mapSheet').hidden = !on;
+  if (!on) mapSeq++; // drop any in-flight route response
+}
+
+async function openMap(d) {
+  history.pushState({ search: !!history.state?.search, map: true }, '');
+  setMapVisible(true);
+  const msg = document.getElementById('mapMsg');
+  document.getElementById('mapLine').textContent = d.line;
+  document.getElementById('mapDest').textContent = d.dest;
+  if (!window.L) { msg.textContent = 'Kartan kunde inte laddas'; return; }
+
+  const here = [+d.lat, +d.lon];
+  if (!map) {
+    map = L.map('map');
+    L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19, attribution: '© OpenStreetMap'
+    }).addTo(map);
+    mapLayer = L.layerGroup().addTo(map);
+  }
+  mapLayer.clearLayers();
+  map.invalidateSize();
+  map.setView(here, 15);
+  L.circleMarker(here, { radius: 9, color: '#0A0A0A', weight: 3, fillColor: '#F5F4EF', fillOpacity: 1 })
+    .addTo(mapLayer);
+  msg.textContent = 'Hämtar rutt…';
+
+  const seq = ++mapSeq;
+  let stops = [];
+  try {
+    const qs = new URLSearchParams({ stop: d.stop, line: d.line, dir: d.dir, time: d.time });
+    const r = await fetch(`${PROXY_BASE}/journey?${qs}`);
+    if (r.ok) stops = (await r.json()).stops || [];
+  } catch {}
+  if (seq !== mapSeq) return;
+
+  if (stops.length < 2) { msg.textContent = 'Kunde inte hitta rutten'; return; }
+  msg.textContent = '';
+
+  // "Yours" = the stop nearest the departure's boarding coordinates.
+  const dist = s => (s.lat - here[0]) ** 2 + (s.lon - here[1]) ** 2;
+  const idx = stops.reduce((best, s, i) => dist(s) < dist(stops[best]) ? i : best, 0);
+  const pts = stops.map(s => [s.lat, s.lon]);
+
+  L.polyline(pts.slice(0, idx + 1), { color: '#999', weight: 4, dashArray: '6 8' }).addTo(mapLayer);
+  L.polyline(pts.slice(idx), { color: '#0A0A0A', weight: 5 }).addTo(mapLayer);
+  stops.forEach((s, i) => {
+    if (i === idx) return;
+    const ahead = i > idx;
+    L.circleMarker(pts[i], { radius: 4, color: '#0A0A0A', weight: 2, fillColor: ahead ? '#F5F4EF' : '#ccc', fillOpacity: 1 })
+      .bindTooltip(escapeHtml(s.name), { direction: 'top' })
+      .addTo(mapLayer);
+  });
+  L.marker(pts[stops.length - 1]).bindTooltip(escapeHtml(stops[stops.length - 1].name), { permanent: true, direction: 'top' })
+    .addTo(mapLayer);
+  map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+}
 
 function openSearch() {
   document.getElementById('mainView').classList.add('hidden');
@@ -1027,7 +1155,7 @@ async function showStopDepartures(extId, name) {
       cleanDest(d.route?.direction),
       d
     ]);
-    el.innerHTML = buildTable(rows, 8);
+    el.innerHTML = buildTable(rows, 8, undefined, extId);
   } catch(e) {
     el.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>`;
   }
@@ -1062,7 +1190,7 @@ setInterval(checkForUpdate, UPDATE_CHECK_MS);
 checkForUpdate();
 
 // ── Boot ──────────────────────────────────────────────────────────────────
-if (history.state?.search) history.replaceState(null, ''); // reload lands on main view
+if (history.state?.search || history.state?.map) history.replaceState(null, ''); // reload lands on main view
 document.getElementById('searchResults').addEventListener('click', e => {
   const row = e.target.closest('.result-item');
   if (row) showStopDepartures(row.dataset.id, row.dataset.name);
