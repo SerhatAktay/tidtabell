@@ -1117,6 +1117,15 @@ async function openMap(d) {
   map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
 }
 
+// A marker (not a circleMarker) so it always draws above the route lines, and can rotate:
+// a triangle pointing along the bearing (degrees clockwise from north), a dot when unknown.
+const vehicleIcon = b => L.divIcon({
+  className: '', iconSize: [24, 24], iconAnchor: [12, 12],
+  html: b == null
+    ? '<svg width="24" height="24"><circle cx="12" cy="12" r="8" fill="#D71921" stroke="#fff" stroke-width="3"/></svg>'
+    : `<svg width="24" height="24" style="transform:rotate(${b}deg)"><polygon points="12,1 18,23 6,23" fill="#D71921" stroke="#fff" stroke-width="2" stroke-linejoin="round"/></svg>`,
+});
+
 // Live vehicle dot: poll /vehicle every 10 s until the map closes (mapSeq moves on).
 // Silent when the trip has no position (other operators, not started yet).
 async function trackVehicle(d, known, seq) {
@@ -1129,8 +1138,8 @@ async function trackVehicle(d, known, seq) {
       if (seq !== mapSeq) return;
       if (v.lat != null) {
         const p = [v.lat, v.lon];
-        if (marker) marker.setLatLng(p);
-        else marker = L.circleMarker(p, { radius: 8, color: '#fff', weight: 3, fillColor: '#D71921', fillOpacity: 1 })
+        if (marker) marker.setLatLng(p).setIcon(vehicleIcon(v.bearing));
+        else marker = L.marker(p, { icon: vehicleIcon(v.bearing), zIndexOffset: 1000 })
           .bindTooltip('Live', { direction: 'top' }).addTo(mapLayer);
       }
     } catch {}
