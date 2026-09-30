@@ -20,7 +20,11 @@
  * returns the stops it passes, with coordinates, for the map view. Uses
  * departureBoard's passlist=1 — v2.1 has no journeyDetail endpoint.
  *
- * After saving, go to Settings → Variables and add both.
+ * 3) GTFS Regional Realtime — /vehicle (live vehicle position on the map).
+ *    Add the "GTFS Regional Realtime" product to your Trafiklab project.
+ *      GTFSRT_KEY = <your key>   (mark as Encrypted)
+ *
+ * After saving, go to Settings → Variables and add all three.
  *
  * Note: the /geocode route (nearby-a-place search) has been removed along
  * with that feature on the frontend — only /nearbystops (geolocation-based
@@ -29,6 +33,7 @@
 
 const REALTIME  = 'https://realtime-api.trafiklab.se/v1';
 const RESROBOT  = 'https://api.resrobot.se/v2.1';
+const GTFSRT    = 'https://opendata.samtrafiken.se/gtfs-rt';
 
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
@@ -57,6 +62,7 @@ async function handleRequest(request) {
   }
 
   if (url.pathname === '/journey') return journey(url);
+  if (url.pathname === '/vehicle') return vehicle(url);
 
   if (!isDepartures && !isStopSearch) {
     return new Response('Not found', { status: 404, headers: corsHeaders() });
@@ -99,6 +105,57 @@ async function journey(url) {
   } catch (e) {
     return json({ stops: [], error: String(e.message || e) }, 502);
   }
+}
+
+// /vehicle?trip=<trip_id> -> { lat, lon, bearing, ts } | { vehicle: null }
+// Live position from the GTFS Regional Realtime VehiclePositions feed (SL).
+// trip_id is the one the Realtime departures API returns (same GTFS id space).
+// ponytail: SL feed only; other operators need their own /gtfs-rt/<operator>/ path.
+async function vehicle(url) {
+  const trip = url.searchParams.get('trip');
+  if (!trip) return json({ vehicle: null }, 400);
+  try {
+    // Edge-cache 10 s so any number of open maps cost at most ~6 upstream calls/min.
+    const r = await fetch(`${GTFSRT}/sl/VehiclePositions.pb?key=${GTFSRT_KEY}`,
+      { cf: { cacheTtl: 10, cacheEverything: true } });
+    if (!r.ok) return json({ vehicle: null, error: `HTTP ${r.status}` }, 502);
+    return json(findVehicle(new Uint8Array(await r.arrayBuffer()), trip) || { vehicle: null });
+  } catch (e) {
+    return json({ vehicle: null, error: String(e.message || e) }, 502);
+  }
+}
+
+// Minimal protobuf reader — just enough for gtfs-realtime VehiclePositions:
+// FeedMessage.entity(2) > FeedEntity.vehicle(4) > VehiclePosition{trip(1){trip_id(1)}, position(2){lat(1),lon(2),bearing(3) floats}, timestamp(5)}
+function fields(buf) {
+  const out = [];
+  let i = 0;
+  const varint = () => { let v = 0, s = 0, b; do { b = buf[i++]; v += (b & 127) * 2 ** s; s += 7; } while (b & 128); return v; };
+  while (i < buf.length) {
+    const tag = varint(), num = tag >>> 3, wire = tag & 7;
+    if (wire === 0) out.push([num, varint()]);
+    else if (wire === 2) { const n = varint(); out.push([num, buf.subarray(i, i + n)]); i += n; }
+    else if (wire === 5) { out.push([num, new DataView(buf.buffer, buf.byteOffset + i, 4).getFloat32(0, true)]); i += 4; }
+    else if (wire === 1) i += 8;
+    else throw new Error('bad wire type ' + wire);
+  }
+  return out;
+}
+const field = (buf, num) => fields(buf).find(f => f[0] === num)?.[1];
+
+function findVehicle(feed, tripId) {
+  const dec = new TextDecoder();
+  for (const [num, ent] of fields(feed)) {
+    if (num !== 2) continue;
+    const veh = field(ent, 4);
+    const tripMsg = veh && field(veh, 1);
+    const id = tripMsg && field(tripMsg, 1);
+    if (!id || dec.decode(id) !== tripId) continue;
+    const pos = field(veh, 2);
+    if (!pos) return null;
+    return { lat: field(pos, 1), lon: field(pos, 2), bearing: field(pos, 3) ?? null, ts: field(veh, 5) ?? null };
+  }
+  return null;
 }
 
 function json(obj, status = 200) {

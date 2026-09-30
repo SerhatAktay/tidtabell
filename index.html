@@ -827,7 +827,7 @@ function buildTable(rows, max, walkMin, stopId) {
     // Tappable → map. Needs the queried stop id (for ResRobot lookup) and the
     // boarding stop's coordinates (fallback pin + which stop is "yours").
     const tap = (!dep.canceled && stopId && dep.stop?.lat != null)
-      ? ` data-stop="${escapeHtml(stopId)}" data-line="${escapeHtml(dep.route?.designation)}" data-dir="${escapeHtml(dep.route?.direction)}" data-time="${escapeHtml(dep.scheduled)}" data-dest="${escapeHtml(dest)}" data-lat="${dep.stop.lat}" data-lon="${dep.stop.lon}" tabindex="0" role="button" aria-label="Visa rutt på karta"`
+      ? ` data-stop="${escapeHtml(stopId)}" data-line="${escapeHtml(dep.route?.designation)}" data-dir="${escapeHtml(dep.route?.direction)}" data-time="${escapeHtml(dep.scheduled)}" data-dest="${escapeHtml(dest)}" data-trip="${escapeHtml(dep.trip?.trip_id)}" data-lat="${dep.stop.lat}" data-lon="${dep.stop.lon}" tabindex="0" role="button" aria-label="Visa rutt på karta"`
       : '';
 
     return `<tr class="${rowClass}"${tap}>
@@ -1048,6 +1048,7 @@ async function openMap(d) {
   msg.textContent = 'Hämtar rutt…';
 
   const seq = ++mapSeq;
+  if (d.trip) trackVehicle(d.trip, seq);
   let stops = [];
   try {
     const qs = new URLSearchParams({ stop: d.stop, line: d.line, dir: d.dir, time: d.time });
@@ -1078,6 +1079,25 @@ async function openMap(d) {
   L.marker(pts[stops.length - 1]).bindTooltip(label(stops[stops.length - 1]), { permanent: true, direction: 'top' })
     .addTo(mapLayer);
   map.fitBounds(L.latLngBounds(pts), { padding: [30, 30] });
+}
+
+// Live vehicle dot: poll /vehicle every 10 s until the map closes (mapSeq moves on).
+// Silent when the trip has no position (other operators, not started yet).
+async function trackVehicle(trip, seq) {
+  let marker;
+  while (seq === mapSeq) {
+    try {
+      const v = await (await fetch(`${PROXY_BASE}/vehicle?trip=${encodeURIComponent(trip)}`)).json();
+      if (seq !== mapSeq) return;
+      if (v.lat != null) {
+        const p = [v.lat, v.lon];
+        if (marker) marker.setLatLng(p);
+        else marker = L.circleMarker(p, { radius: 8, color: '#fff', weight: 3, fillColor: '#D71921', fillOpacity: 1 })
+          .bindTooltip('Live', { direction: 'top' }).addTo(mapLayer);
+      }
+    } catch {}
+    await new Promise(r => setTimeout(r, 10000));
+  }
 }
 
 function openSearch() {
