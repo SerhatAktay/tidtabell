@@ -97,17 +97,17 @@
     }
     .page.hidden { display: none; }
 
-    /* The boards (one per stop) sit in their own container so the place chips above
-       them don't become a grid cell. */
-    .boards { display: flex; flex-direction: column; gap: 28px; }
     @media (min-width: 1000px) {
-      #mainView { max-width: 1400px; }
-      .boards { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
+      /* Needed because .page.hidden's `display: none` (0 IDs, 2 classes)
+         loses to #mainView's `display: grid` below (1 ID always outranks
+         any number of classes) — without this override the boards stay
+         visible behind the search view at this width. */
+      #mainView.hidden { display: none; }
+      #mainView { max-width: 1400px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: start; }
     }
 
     @media (max-width: 600px) {
       .page { padding: 16px; gap: 20px; }
-      .boards { gap: 20px; }
       header { padding: 12px 16px; }
       #clock { font-size: 22px; }
       .dep-table td { padding: 13px 12px; }
@@ -328,36 +328,7 @@
     #clearBtn:hover { color: var(--ink); }
     #clearBtn[hidden] { display: none; }
 
-    /* ── Place chips (Här / Hem / Jobb) ──────────────────────────── */
-    .place-bar { display: flex; gap: 8px; flex-wrap: wrap; }
-    .place-chip {
-      border: 2px solid var(--ink); background: none; color: var(--ink);
-      font: inherit; font-size: 11px; font-weight: 700;
-      letter-spacing: 1.5px; text-transform: uppercase;
-      padding: 7px 14px; cursor: pointer;
-    }
-    .place-chip[aria-pressed="true"] { background: var(--ink); color: var(--paper); }
-    .place-note { margin-top: -14px; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--dim); }
-    .place-note:empty { display: none; }
-    #boards .nearby-btn { border-top: 2px solid var(--ink); }
-
-    /* ── Settings ───────────────────────────────────────────────── */
-    #settingsBody { display: flex; flex-direction: column; gap: 28px; }
-    .set-place { display: flex; flex-direction: column; gap: 12px; }
-    .set-list > :first-child, .set-results > :first-child { border-top: 2px solid var(--ink); }
-    .set-stop {
-      display: flex; align-items: center; justify-content: space-between; gap: 12px;
-      border: 2px solid var(--ink); border-top: none; padding: 10px 20px;
-    }
-    .set-stop .result-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-    .set-del {
-      background: none; border: none; cursor: pointer; flex-shrink: 0;
-      color: var(--dim); font-size: 26px; font-weight: 200; line-height: 1; padding: 0 4px;
-    }
-    .set-del:hover { color: var(--ink); }
-    .set-place .nearby-btn { border-top: 2px solid var(--ink); }
-
-    #searchInput, .set-input {
+    #searchInput {
       flex: 1; min-width: 0;
       border: none; outline: none;
       background: var(--paper); color: var(--ink);
@@ -419,12 +390,6 @@
         <line x1="12.5" y1="12.5" x2="18" y2="18"/>
       </svg>
     </button>
-    <button class="search-btn" id="settingsBtn" onclick="showSettings()" title="Inställningar" aria-label="Inställningar">
-      <svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" aria-hidden="true">
-        <line x1="3" y1="5" x2="17" y2="5"/><line x1="3" y1="10" x2="17" y2="10"/><line x1="3" y1="15" x2="17" y2="15"/>
-        <circle cx="7" cy="5" r="1.9" fill="#0A0A0A"/><circle cx="13" cy="10" r="1.9" fill="#0A0A0A"/><circle cx="8" cy="15" r="1.9" fill="#0A0A0A"/>
-      </svg>
-    </button>
     <button class="search-btn" id="refreshBtn" onclick="fetchAll()" title="Uppdatera" aria-label="Uppdatera">
     <svg class="refresh-dot" width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
       <circle cx="10" cy="10" r="7" fill="none" stroke="rgba(245,244,239,0.25)" stroke-width="1.5"/>
@@ -440,9 +405,38 @@
 <!-- ── Main view ─────────────────────────────────────────────── -->
 <div class="page" id="mainView">
 
-  <div class="place-bar" id="placeBar"></div>
-  <div class="place-note" id="placeNote" role="status"></div>
-  <div class="boards" id="boards"></div>
+  <div class="board">
+    <button type="button" class="board-head" data-board="busBoard" aria-expanded="true">
+      <span class="board-titles">
+        <span class="board-name">Vasalund</span>
+        <span class="board-sub">Buss</span>
+      </span>
+      <span class="board-chev" aria-hidden="true">▾</span>
+    </button>
+    <div id="busBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+  </div>
+
+  <div class="board">
+    <button type="button" class="board-head" data-board="trainBoard" aria-expanded="true">
+      <span class="board-titles">
+        <span class="board-name">Solna station</span>
+        <span class="board-sub">Pendeltåg</span>
+      </span>
+      <span class="board-chev" aria-hidden="true">▾</span>
+    </button>
+    <div id="trainBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+  </div>
+
+  <div class="board">
+    <button type="button" class="board-head" data-board="metroBoard" aria-expanded="true">
+      <span class="board-titles">
+        <span class="board-name">Solna centrum</span>
+        <span class="board-sub">T-bana</span>
+      </span>
+      <span class="board-chev" aria-hidden="true">▾</span>
+    </button>
+    <div id="metroBoard"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
+  </div>
 
 </div>
 
@@ -463,11 +457,6 @@
   <div id="stopBoard"></div>
 </div>
 
-<!-- ── Settings view ─────────────────────────────────────────── -->
-<div class="page hidden" id="settingsView">
-  <div id="settingsBody"></div>
-</div>
-
 
 <!-- ── Map sheet ─────────────────────────────────────────────── -->
 <div class="map-sheet" id="mapSheet" hidden role="dialog" aria-modal="true" aria-label="Rutt på karta">
@@ -484,6 +473,10 @@
 // After deploying worker.js to Cloudflare, paste your worker URL here:
 const PROXY_BASE  = 'https://tidtabell.serhat-fd0.workers.dev';
 
+const VASALUND_ID = '740066635';
+const SOLNA_ID    = '740000759';
+const SOLNA_C_ID  = '740021642';
+const WALK        = { vasalund: 3, solna: 10, solnac: 14 };
 const REFRESH_SEC  = 30;
 const MAX_ROWS     = 4;
 const MAX_PER_LINE = 2;  // cap repeats of the same line+destination on a board
@@ -847,18 +840,30 @@ function buildTable(rows, max, walkMin, stopId) {
   return `<table class="dep-table"><tbody>${body}</tbody></table>`;
 }
 
-// One board row: [line, destination, departure].
-const mapRow = d => [d.route?.designation || '?', cleanDest(d.route?.direction), d];
+// ── Home board filters ────────────────────────────────────────────────────
+function busFilter(dep) {
+  const dir = dep.route?.direction || '';
+  const num = dep.route?.designation || '';
+  return dir.includes('Odenplan') || dir.includes('Sundbyberg') ||
+         (num === '509' && dir.includes('Tomteboda'));
+}
 
-// ── Fetch boards ──────────────────────────────────────────────────────────
+function trainDest(dep) {
+  const dir = dep.route?.direction || '';
+  if (dir.includes('Uppsala') || dir.includes('Gävle'))  return 'Uppsala';
+  if (dir.includes('Märsta') || dir.includes('Arlanda')) return 'Märsta';
+  return 'Stockholm C';
+}
+
+// ── Fetch home boards ─────────────────────────────────────────────────────
 // Show every departure in the next hour, capped to MAX_PER_LINE per
 // line+destination so one frequent line doesn't crowd out the rest. If
 // that leaves fewer than 5 rows, look further ahead (the API's window is a
 // fixed 60 minutes, so this means re-querying with a later `time`) until
 // there are at least 5 (post-cap), or give up.
-async function fetchHomeBoardRows(stopId) {
+async function fetchHomeBoardRows(stopId, filterFn, mapFn) {
   const deps = await fetchDepartures(stopId);
-  let rows = capRepeats(deps.map(mapRow), MAX_PER_LINE);
+  let rows = capRepeats(deps.filter(filterFn).map(mapFn), MAX_PER_LINE);
   if (rows.length >= 5) return rows.slice(0, 5);
 
   let cursor = new Date();
@@ -870,7 +875,7 @@ async function fetchHomeBoardRows(stopId) {
     } catch {
       break;
     }
-    rows = capRepeats(rows.concat(more.map(mapRow)), MAX_PER_LINE);
+    rows = capRepeats(rows.concat(more.filter(filterFn).map(mapFn)), MAX_PER_LINE);
   }
   return rows.slice(0, 5);
 }
@@ -885,11 +890,11 @@ function apiTimeParam(d) {
 // ponytail: in-memory only, so offline first load after a reload still shows the error.
 const lastGood = {};
 
-async function loadHomeBoard(elId, stopId) {
+async function loadHomeBoard(elId, stopId, filterFn, mapFn, walkMin) {
   const el = document.getElementById(elId);
   try {
-    const rows = await fetchHomeBoardRows(stopId);
-    const html = buildTable(rows, rows.length, undefined, stopId);
+    const rows = await fetchHomeBoardRows(stopId, filterFn, mapFn);
+    const html = buildTable(rows, rows.length, walkMin, stopId);
     lastGood[elId] = { html, at: new Date() };
     el.innerHTML = html;
   } catch (e) {
@@ -901,195 +906,33 @@ async function loadHomeBoard(elId, stopId) {
 }
 
 function fetchAll() {
-  boardStops.forEach(s => loadHomeBoard('b' + s.extId, s.extId));
+  loadHomeBoard(
+    'busBoard', VASALUND_ID,
+    d => d.route?.transport_mode === 'BUS' && busFilter(d),
+    d => {
+      const num  = d.route.designation;
+      const dest = (num === '509' && (d.route.direction||'').includes('Tomteboda')) ? 'Solna C' : cleanDest(d.route.direction);
+      return [num, dest, d];
+    },
+    WALK.vasalund
+  );
+
+  loadHomeBoard(
+    'trainBoard', SOLNA_ID,
+    d => d.route?.transport_mode === 'TRAIN',
+    d => [d.route.designation, trainDest(d), d],
+    WALK.solna
+  );
+
+  loadHomeBoard(
+    'metroBoard', SOLNA_C_ID,
+    d => d.route?.transport_mode === 'METRO',
+    d => [d.route.designation, cleanDest(d.route.direction), d],
+    WALK.solnac
+  );
+
   startCountdown();
 }
-
-// ── Places: Här / Hem / Jobb ──────────────────────────────────────────────
-// Hem and Jobb are lists of up to MAX_STOPS stops the user picked in settings; Här is
-// the stops nearest to the current position. The main view shows one board per stop.
-const PLACES_KEY  = 'tidtabell_places_v1'; // { home: [{extId, name}], work: [...] }
-const PLACE_KEY   = 'tidtabell_place_v1';  // 'here' | 'home' | 'work'
-const PLACE_LABEL = { here: 'Här', home: 'Hem', work: 'Jobb' };
-const MAX_STOPS   = 3;
-const NEAR_RADIUS = 500; // metres
-
-function loadPlaces() {
-  try { return { home: [], work: [], ...JSON.parse(localStorage.getItem(PLACES_KEY)) }; }
-  catch { return { home: [], work: [] }; }
-}
-function savePlaces(p) { try { localStorage.setItem(PLACES_KEY, JSON.stringify(p)); } catch {} }
-
-let place = null;
-try { place = localStorage.getItem(PLACE_KEY); } catch {}
-if (!PLACE_LABEL[place]) place = 'here';
-let boardStops = []; // stops on the main view: [{ extId, name }]
-let placeSeq = 0;    // a newer showPlace() makes an older, slower one drop its result
-
-// Nearest stops to a position, one per name (a station has several stop points).
-async function nearestStops(loc) {
-  const seen = new Set();
-  return (await fetchNearby(loc.lat, loc.lon, NEAR_RADIUS, 10))
-    .filter(s => !seen.has(s.name) && seen.add(s.name))
-    .slice(0, MAX_STOPS)
-    .map(({ extId, name }) => ({ extId, name }));
-}
-
-function renderChips() {
-  document.getElementById('placeBar').innerHTML = Object.entries(PLACE_LABEL).map(([k, label]) =>
-    `<button type="button" class="place-chip" data-place="${k}" aria-pressed="${k === place}">${label}</button>`).join('');
-}
-
-function renderBoards() {
-  document.getElementById('boards').innerHTML = boardStops.map(s => `
-    <div class="board">
-      <button type="button" class="board-head" data-board="b${escapeHtml(s.extId)}" aria-expanded="true">
-        <span class="board-titles"><span class="board-name">${escapeHtml(s.name)}</span></span>
-        <span class="board-chev" aria-hidden="true">▾</span>
-      </button>
-      <div id="b${escapeHtml(s.extId)}"><div class="state-msg"><span class="dot-anim">Hämtar</span></div></div>
-    </div>`).join('');
-  initBoardToggles();
-}
-
-const settingsLink = `<button type="button" class="nearby-btn" onclick="showSettings()"><span>Välj hållplatser i inställningar</span></button>`;
-
-// Här's nearest stops are remembered for 5 minutes (across reloads), so reopening the page
-// doesn't repeat the lookup. Tapping the already-selected Här chip forces a fresh one.
-const HERE_KEY = 'tidtabell_here_v1';
-const HERE_TTL = 5 * 60 * 1000;
-
-function cachedHere() {
-  try {
-    const c = JSON.parse(localStorage.getItem(HERE_KEY));
-    return c && Date.now() - c.at < HERE_TTL ? c.stops : null;
-  } catch { return null; }
-}
-
-async function hereStops(force) {
-  const cached = force ? null : cachedHere();
-  if (cached) return cached;
-  const stops = await nearestStops(await getCurrentPosition());
-  if (stops.length) try { localStorage.setItem(HERE_KEY, JSON.stringify({ stops, at: Date.now() })); } catch {}
-  return stops;
-}
-
-async function showPlace(p, note = '', force = false) {
-  place = p;
-  try { localStorage.setItem(PLACE_KEY, p); } catch {}
-  renderChips();
-  document.getElementById('placeNote').textContent = note;
-  const el  = document.getElementById('boards');
-  const seq = ++placeSeq;
-  boardStops = [];
-
-  if (p === 'here') {
-    el.innerHTML = '<div class="state-msg"><span class="dot-anim">Hämtar plats</span></div>';
-    try {
-      const stops = await hereStops(force);
-      if (seq !== placeSeq) return;
-      if (!stops.length) { el.innerHTML = `<div class="state-msg">Inga hållplatser inom ${NEAR_RADIUS} m</div>`; return; }
-      boardStops = stops;
-    } catch (e) {
-      if (seq !== placeSeq) return;
-      if (loadPlaces().home.length) return showPlace('home', `${e.message} · visar Hem`);
-      el.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(e.message)}</div>${settingsLink}`;
-      return;
-    }
-  } else {
-    boardStops = loadPlaces()[p];
-    if (!boardStops.length) {
-      el.innerHTML = `<div class="state-msg">Inga hållplatser sparade för ${PLACE_LABEL[p]}</div>${settingsLink}`;
-      return;
-    }
-  }
-  renderBoards();
-  fetchAll();
-}
-
-document.getElementById('placeBar').addEventListener('click', e => {
-  const chip = e.target.closest('.place-chip');
-  if (chip) showPlace(chip.dataset.place, '', chip.dataset.place === place); // same chip again = refresh
-});
-
-// ── Settings: pick the stops behind Hem and Jobb ──────────────────────────
-let settingsDirty = false; // stops changed: reload the boards when leaving
-let setTimer = null;
-
-function renderSettings() {
-  const places = loadPlaces();
-  document.getElementById('settingsBody').innerHTML =
-    `<div class="board-sub">Välj upp till ${MAX_STOPS} hållplatser för Hem och Jobb. Här använder din position.</div>` +
-    ['home', 'work'].map(k => `
-      <section class="set-place" data-place="${k}">
-        <div class="recents-label">${PLACE_LABEL[k]}</div>
-        <div class="set-list">${places[k].length
-          ? places[k].map(s => `<div class="set-stop"><span class="result-name">${escapeHtml(s.name)}</span>
-              <button type="button" class="set-del" data-id="${escapeHtml(s.extId)}" aria-label="Ta bort ${escapeHtml(s.name)}">×</button></div>`).join('')
-          : '<div class="state-msg">Inga hållplatser</div>'}</div>
-        ${places[k].length >= MAX_STOPS ? '' : `
-        <div class="search-field"><input type="text" class="set-input" placeholder="Sök hållplats…" aria-label="Sök hållplats för ${PLACE_LABEL[k]}" autocomplete="off"></div>
-        <div class="set-results"></div>
-        <button type="button" class="nearby-btn set-here"><span>Lägg till närmaste hållplats</span></button>`}
-      </section>`).join('');
-}
-
-function addPlaceStop(k, stop) {
-  const places = loadPlaces();
-  if (places[k].length < MAX_STOPS && !places[k].some(s => s.extId === stop.extId)) {
-    places[k].push({ extId: stop.extId, name: stop.name });
-    savePlaces(places);
-    settingsDirty = true;
-  }
-  renderSettings();
-}
-
-const settingsBody = document.getElementById('settingsBody');
-
-settingsBody.addEventListener('click', async e => {
-  const sec = e.target.closest('.set-place');
-  if (!sec) return;
-  const k = sec.dataset.place;
-  const del = e.target.closest('.set-del');
-  const row = e.target.closest('.result-item');
-  if (del) {
-    const places = loadPlaces();
-    places[k] = places[k].filter(s => s.extId !== del.dataset.id);
-    savePlaces(places);
-    settingsDirty = true;
-    renderSettings();
-  } else if (row) {
-    addPlaceStop(k, { extId: row.dataset.id, name: row.dataset.name });
-  } else if (e.target.closest('.set-here')) {
-    const out = sec.querySelector('.set-results');
-    out.innerHTML = '<div class="state-msg"><span class="dot-anim">Hämtar plats</span></div>';
-    try {
-      const [near] = await nearestStops(await getCurrentPosition());
-      if (near) addPlaceStop(k, near);
-      else out.innerHTML = `<div class="state-msg">Inga hållplatser inom ${NEAR_RADIUS} m</div>`;
-    } catch (err) {
-      out.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(err.message)}</div>`;
-    }
-  }
-});
-
-settingsBody.addEventListener('input', e => {
-  if (!e.target.matches('.set-input')) return;
-  const out = e.target.closest('.set-place').querySelector('.set-results');
-  const q = e.target.value.trim();
-  clearTimeout(setTimer);
-  if (!q) { out.innerHTML = ''; return; }
-  out.innerHTML = '<div class="state-msg"><span class="dot-anim">Söker</span></div>';
-  setTimer = setTimeout(async () => {
-    try {
-      const stops = await searchStops(q);
-      if (e.target.value.trim() !== q) return; // typed on meanwhile
-      out.innerHTML = stops.length ? stops.map(s => stopRow(s, '')).join('') : '<div class="state-msg">Inga hållplatser hittades</div>';
-    } catch (err) {
-      out.innerHTML = `<div class="state-msg">⚠ ${escapeHtml(err.message)}</div>`;
-    }
-  }, 380);
-});
 
 // ── Countdown / arc ───────────────────────────────────────────────────────
 const CIRC = 43.98;
@@ -1146,49 +989,26 @@ function showSearch() {
 }
 
 function goBack() {
-  if (history.state?.search || history.state?.settings) history.back(); // popstate closes the view
-  else { closeSearch(); closeSettings(); }
+  if (history.state?.search) history.back(); // popstate closes the view
+  else closeSearch();
 }
 
-function showSettings() {
-  history.pushState({ settings: true }, '');
-  openSettings();
-}
-
-function openSettings() {
-  settingsDirty = false;
-  document.getElementById('mainView').classList.add('hidden');
-  document.getElementById('settingsView').classList.remove('hidden');
-  document.getElementById('backBtn').classList.add('visible');
-  renderSettings();
-}
-
-function closeSettings() {
-  document.getElementById('settingsView').classList.add('hidden');
-  document.getElementById('mainView').classList.remove('hidden');
-  document.getElementById('backBtn').classList.remove('visible');
-  if (settingsDirty) { settingsDirty = false; showPlace(place); } // stops changed: rebuild the boards
-}
-
-// State is { search, settings, map }. The map sheet sits on top of whatever view opened
+// State is { search, map }. The map sheet sits on top of whatever view opened
 // it, so leaving it must not re-open (and reset) the search view underneath.
 window.addEventListener('popstate', () => {
   const st = history.state || {};
   setMapVisible(!!st.map);
   if (st.map) return;
-  const hidden = id => document.getElementById(id).classList.contains('hidden');
-  if (st.search && hidden('searchView')) openSearch();
-  else if (!st.search && !hidden('searchView')) closeSearch();
-  if (st.settings && hidden('settingsView')) openSettings();
-  else if (!st.settings && !hidden('settingsView')) closeSettings();
+  const searchHidden = document.getElementById('searchView').classList.contains('hidden');
+  if (st.search && searchHidden) openSearch();
+  else if (!st.search && !searchHidden) closeSearch();
 });
 
 document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && e.target.matches?.('tr[data-stop]')) { openMap(e.target.dataset); return; }
   if (e.key !== 'Escape') return;
   if (!document.getElementById('mapSheet').hidden) history.back();
-  else if (!document.getElementById('searchView').classList.contains('hidden')
-        || !document.getElementById('settingsView').classList.contains('hidden')) goBack();
+  else if (!document.getElementById('searchView').classList.contains('hidden')) goBack();
 });
 
 document.addEventListener('click', e => {
@@ -1459,12 +1279,13 @@ setInterval(checkForUpdate, UPDATE_CHECK_MS);
 checkForUpdate();
 
 // ── Boot ──────────────────────────────────────────────────────────────────
-if (history.state?.search || history.state?.settings || history.state?.map) history.replaceState(null, ''); // reload lands on main view
+if (history.state?.search || history.state?.map) history.replaceState(null, ''); // reload lands on main view
 document.getElementById('searchResults').addEventListener('click', e => {
   const row = e.target.closest('.result-item');
   if (row) showStopDepartures(row.dataset.id, row.dataset.name);
 });
-showPlace(place); // opens on Här by default; falls back to Hem if location is unavailable
+initBoardToggles();
+fetchAll();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 </script>
 </body>
