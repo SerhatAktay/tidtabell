@@ -827,7 +827,7 @@ function buildTable(rows, max, walkMin, stopId) {
     // Tappable → map. Needs the queried stop id (for ResRobot lookup) and the
     // boarding stop's coordinates (fallback pin + which stop is "yours").
     const tap = (!dep.canceled && stopId && dep.stop?.lat != null)
-      ? ` data-stop="${escapeHtml(stopId)}" data-line="${escapeHtml(dep.route?.designation)}" data-dir="${escapeHtml(dep.route?.direction)}" data-time="${escapeHtml(dep.scheduled)}" data-dest="${escapeHtml(dest)}" data-trip="${escapeHtml(dep.trip?.trip_id)}" data-lat="${dep.stop.lat}" data-lon="${dep.stop.lon}" tabindex="0" role="button" aria-label="Visa rutt på karta"`
+      ? ` data-stop="${escapeHtml(stopId)}" data-line="${escapeHtml(dep.route?.designation)}" data-dir="${escapeHtml(dep.route?.direction)}" data-time="${escapeHtml(dep.scheduled)}" data-dest="${escapeHtml(dest)}" data-trip="${escapeHtml(dep.trip?.trip_id)}" data-num="${escapeHtml(dep.trip?.technical_number)}" data-date="${escapeHtml(dep.trip?.start_date)}" data-lat="${dep.stop.lat}" data-lon="${dep.stop.lon}" tabindex="0" role="button" aria-label="Visa rutt på karta"`
       : '';
 
     return `<tr class="${rowClass}"${tap}>
@@ -1024,6 +1024,27 @@ function setMapVisible(on) {
   if (!on) mapSeq++; // drop any in-flight route response
 }
 
+// ── Static route data ─────────────────────────────────────────────────────
+// Built daily into gtfs/ by .github/workflows/gtfs.yml (scripts/build_gtfs.py):
+//   t/<last 2 digits>.json  trip_id -> pattern key
+//   p/<key>.json            { s: [[lat, lon, name]…] stops, l: [[lat, lon]…] road line }
+//   r/<YYYYMMDD>.json       "line|train number" -> static trip_id (pendeltåg: realtime ids differ)
+const gtfsJson = async p => { const r = await fetch(`gtfs/${p}`); return r.ok ? r.json() : null; };
+
+// -> { id: static trip_id, route: { s, l } }, or null (other operator, data not built yet, offline)
+async function staticTrip(d) {
+  try {
+    const keyOf = async id => id && (await gtfsJson(`t/${id.slice(-2)}.json`))?.[id];
+    let id = d.trip, key = await keyOf(id);
+    if (!key && d.num && d.date) {
+      id = (await gtfsJson(`r/${d.date.replace(/-/g, '')}.json`))?.[`${d.line}|${d.num}`];
+      key = await keyOf(id);
+    }
+    const route = key && await gtfsJson(`p/${key}.json`);
+    return route ? { id, route } : null;
+  } catch { return null; }
+}
+
 async function openMap(d) {
   history.pushState({ search: !!history.state?.search, map: true }, '');
   setMapVisible(true);
@@ -1048,14 +1069,25 @@ async function openMap(d) {
   msg.textContent = 'Hämtar rutt…';
 
   const seq = ++mapSeq;
-  if (d.trip) trackVehicle(d.trip, seq);
-  let stops = [];
+  const known = staticTrip(d); // whole route from the daily static data (started now, awaited below)
+  if (d.trip) trackVehicle(d, known, seq);
+  let stops = [], road = null;
   try {
     const qs = new URLSearchParams({ stop: d.stop, line: d.line, dir: d.dir, time: d.time });
     const r = await fetch(`${PROXY_BASE}/journey?${qs}`);
     if (r.ok) stops = (await r.json()).stops || [];
   } catch {}
+  const st = await known;
   if (seq !== mapSeq) return;
+
+  if (st) {
+    // Stops before yours from the static data, yours onward from ResRobot (it has the times).
+    const all = st.route.s.map(([lat, lon, name]) => ({ name, lat, lon, time: '' }));
+    const d2 = s => (s.lat - here[0]) ** 2 + (s.lon - here[1]) ** 2;
+    const b = all.reduce((best, s, i) => d2(s) < d2(all[best]) ? i : best, 0);
+    stops = stops.length ? all.slice(0, b).concat(stops) : all;
+    road = st.route.l.length > 1 ? st.route.l : null;
+  }
 
   if (stops.length < 2) { msg.textContent = 'Kunde inte hitta rutten'; return; }
   msg.textContent = '';
@@ -1067,8 +1099,12 @@ async function openMap(d) {
   const label = s => escapeHtml(s.time ? `${s.name} ${s.time}` : s.name);
   hereMarker.bindTooltip(label(stops[idx]), { permanent: true, direction: 'top' });
 
-  L.polyline(pts.slice(0, idx + 1), { color: '#999', weight: 4, dashArray: '6 8' }).addTo(mapLayer);
-  L.polyline(pts.slice(idx), { color: '#0A0A0A', weight: 5 }).addTo(mapLayer);
+  // Road geometry when we have it, else straight lines between stops; split at your stop.
+  const path = road || pts;
+  const pd = p => (p[0] - pts[idx][0]) ** 2 + (p[1] - pts[idx][1]) ** 2;
+  const at = road ? road.reduce((best, p, i) => pd(p) < pd(road[best]) ? i : best, 0) : idx;
+  L.polyline(path.slice(0, at + 1), { color: '#777', weight: 5 }).addTo(mapLayer);
+  L.polyline(path.slice(at), { color: '#0A0A0A', weight: 5 }).addTo(mapLayer);
   stops.forEach((s, i) => {
     if (i === idx) return;
     const ahead = i > idx;
@@ -1083,8 +1119,10 @@ async function openMap(d) {
 
 // Live vehicle dot: poll /vehicle every 10 s until the map closes (mapSeq moves on).
 // Silent when the trip has no position (other operators, not started yet).
-async function trackVehicle(trip, seq) {
+async function trackVehicle(d, known, seq) {
   let marker;
+  // The position feed knows pendeltåg by their static trip_id, not the realtime one.
+  const trip = (await known)?.id || d.trip;
   while (seq === mapSeq) {
     try {
       const v = await (await fetch(`${PROXY_BASE}/vehicle?trip=${encodeURIComponent(trip)}`)).json();

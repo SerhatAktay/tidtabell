@@ -1,0 +1,70 @@
+name: Deploy site
+
+# Publishes the site to GitHub Pages together with gtfs/, the route data built from
+# SL's static GTFS feed (scripts/build_gtfs.py). SL publishes a new feed daily between
+# 03:00 and 07:00 local time; 06:00 UTC is 07:00+ year round.
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      # The static feed allows a limited number of downloads per month, so a plain push
+      # reuses the last build; only the daily run (or a manual run) fetches a fresh feed.
+      - name: Restore last build
+        id: cache
+        uses: actions/cache/restore@v4
+        with:
+          path: gtfs
+          key: gtfs-none
+          restore-keys: gtfs-
+
+      - name: Download and build route data
+        id: build
+        if: github.event_name != 'push' || steps.cache.outputs.cache-matched-key == ''
+        env: { GTFS_STATIC_KEY: '${{ secrets.GTFS_STATIC_KEY }}' }
+        run: |
+          curl -sfL --compressed -o sl.zip "https://opendata.samtrafiken.se/gtfs/sl/sl.zip?key=$GTFS_STATIC_KEY"
+          rm -rf gtfs
+          python3 scripts/build_gtfs.py sl.zip gtfs
+          test "$(ls gtfs/p | wc -l)" -gt 1000   # a broken feed must not replace good data
+
+      - name: Save build
+        if: steps.build.outcome == 'success'
+        uses: actions/cache/save@v4
+        with:
+          path: gtfs
+          key: gtfs-${{ github.run_id }}
+
+      - name: Assemble site
+        run: |
+          mkdir _site
+          rsync -a --exclude=.git --exclude=.github --exclude=scripts --exclude=_site \
+            --exclude=worker.js --exclude=sl.zip --exclude=gtfs ./ _site/
+          [ -d gtfs ] && cp -r gtfs _site/gtfs || true   # no data yet: the page falls back to ResRobot alone
+
+      - uses: actions/upload-pages-artifact@v3
+        with: { path: _site }
+      - id: deployment
+        uses: actions/deploy-pages@v4
