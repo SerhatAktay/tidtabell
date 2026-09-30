@@ -586,7 +586,7 @@ function deltaInfo(dep) {
   const mins = Math.round(sec / 60);
   const clock = new Date(dep.realtime || dep.scheduled)
     .toLocaleTimeString('sv-SE', { hour: '2-digit', minute: '2-digit' });
-  return `${clock} (${mins > 0 ? '+' : ''}${mins})`;
+  return `${clock} · ${Math.abs(mins)} min ${mins > 0 ? 'sen' : 'tidig'}`;
 }
 
 function escapeHtml(str) {
